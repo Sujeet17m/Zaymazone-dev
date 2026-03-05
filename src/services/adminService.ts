@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+const _apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/api$/, '');
+const API_BASE_URL = `${_apiOrigin}/api`;
 
 class AdminService {
   private token: string | null = null

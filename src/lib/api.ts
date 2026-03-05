@@ -40,7 +40,7 @@ const getApiBaseUrl = () => {
 	}
 
 	// Production fallback
-	return "https://zaymazone-backend.onrender.com";
+	return "https://zaymazone-dev.onrender.com";
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -2121,6 +2121,12 @@ export const api = {
 // Utility function to handle image URLs
 export function getImageUrl(path: string): string {
 	if (!path) return '/placeholder.svg';
+
+	// Rewrite localhost image URLs to the current API base (handles DB-stored localhost URLs)
+	if (path.includes('localhost:4000/api/images/') || path.includes('127.0.0.1:4000/api/images/')) {
+		const filename = path.split('/api/images/').pop() || '';
+		return `${API_BASE_URL}/api/images/${filename}`;
+	}
 
 	// If it's already a full URL or data URL, return as is
 	if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) {
