@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Activity, Search, Filter, Download, RefreshCw } from "lucide-react";
 
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:4000' : 'https://zaymazone-backend.onrender.com');
+
 interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -34,7 +36,7 @@ export const AuditLogManagement = () => {
   const loadAuditLogs = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/admin/audit-logs', {
+      const response = await fetch(`${API_BASE}/api/admin/audit-logs`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
         }

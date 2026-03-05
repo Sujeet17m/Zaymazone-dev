@@ -14,6 +14,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { SingleImageUpload } from "./ImageUpload";
 import { adminService } from "@/services/adminService";
 
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:4000' : 'https://zaymazone-backend.onrender.com');
+
 interface Category {
   id: string;
   _id?: string;
@@ -267,7 +269,7 @@ export const CategoriesManagement = () => {
     try {
       setSaving(true);
       const deletePromises = selectedCategories.map(id =>
-        fetch(`http://localhost:4000/api/admin/categories/${id}`, {
+        fetch(`${API_BASE}/api/admin/categories/${id}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
@@ -309,7 +311,7 @@ export const CategoriesManagement = () => {
         const category = categories.find(cat => cat.id === id);
         if (!category) return Promise.resolve();
 
-        return fetch(`http://localhost:4000/api/admin/categories/${id}`, {
+        return fetch(`${API_BASE}/api/admin/categories/${id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
