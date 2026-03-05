@@ -111,7 +111,12 @@ app.use(cors({
 		// Allow requests with no origin (like mobile apps or curl requests)
 		if (!origin) return callback(null, true)
 
-		if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('github.dev')) {
+		const isAllowed =
+			allowedOrigins.indexOf(origin) !== -1 ||
+			origin.includes('github.dev') ||
+			origin.endsWith('.vercel.app') ||
+			origin.endsWith('.netlify.app')
+		if (isAllowed) {
 			callback(null, true)
 		} else {
 			console.log('CORS blocked for origin:', origin)

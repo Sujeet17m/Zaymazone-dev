@@ -4,13 +4,11 @@ import { apiRequest } from '@/lib/api';
 let API_BASE_URL: string;
 
 try {
-  const envUrl = import.meta.env.VITE_API_BASE_URL;
-  console.log('VITE_API_BASE_URL from env:', envUrl);
-  API_BASE_URL = envUrl || 'http://localhost:4000/api';
-  console.log('API configured with base URL:', API_BASE_URL);
+  const envUrl = import.meta.env.VITE_API_BASE_URL ||
+    (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : undefined);
+  API_BASE_URL = envUrl || (import.meta.env.DEV ? 'http://localhost:4000/api' : 'https://zaymazone-dev.onrender.com/api');
 } catch (error) {
-  console.warn('Environment variable not found, using default API URL');
-  API_BASE_URL = 'http://localhost:4000/api';
+  API_BASE_URL = import.meta.env.DEV ? 'http://localhost:4000/api' : 'https://zaymazone-dev.onrender.com/api';
 }
 
 // Helper function to handle API responses
