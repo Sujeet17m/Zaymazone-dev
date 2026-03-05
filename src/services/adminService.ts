@@ -269,6 +269,14 @@ class AdminService {
     return response.json()
   }
 
+  async getOrderById(id: string) {
+    const response = await fetch(`${API_BASE_URL}/admin/orders/${id}`, {
+      headers: this.getAuthHeaders()
+    })
+    if (!response.ok) throw new Error('Failed to fetch order')
+    return response.json()
+  }
+
   async updateOrderStatus(id: string, status: string) {
     const response = await fetch(`${API_BASE_URL}/admin/orders/${id}/status`, {
       method: 'PUT',
@@ -538,6 +546,15 @@ class AdminService {
       headers: this.getAuthHeaders()
     })
     if (!response.ok) throw new Error('Failed to delete artisan')
+    return response.json()
+  }
+
+  async acknowledgeArtisanChanges(id: string) {
+    const response = await fetch(`${API_BASE_URL}/admin/artisans/${id}/acknowledge-changes`, {
+      method: 'PATCH',
+      headers: this.getAuthHeaders()
+    })
+    if (!response.ok) throw new Error('Failed to acknowledge changes')
     return response.json()
   }
 

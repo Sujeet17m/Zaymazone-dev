@@ -960,7 +960,7 @@ All colors MUST be HSL.
 /* Mobile bottom navigation spacing */
 @media (max-width: 768px) {
   body {
-    padding-bottom: 4rem; /* 64px to account for the 16px height bottom nav */
+    padding-bottom: max(4rem, calc(4rem + env(safe-area-inset-bottom, 0px))); /* MobileBottomNav + notch */
   }
 
   /* Mobile-specific layout improvements */
@@ -1410,8 +1410,12 @@ main,
 
 /* Hide any remaining scrollbars completely */
 html {
-  scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+@supports (scrollbar-width: none) {
+  html {
+    scrollbar-width: none; /* Firefox 64+ / Chrome 121+ */
+  }
 }
 
 /* Additional webkit scrollbar hiding */
@@ -1421,4 +1425,232 @@ html::-webkit-scrollbar,
   display: none;
   width: 0 !important;
   height: 0 !important;
+}
+
+/* Dynamic width via CSS custom property — keeps width out of inline styles */
+.bar-countdown-dynamic { width: var(--countdown-pct, 100%); }
+.bar-width-dynamic { width: var(--bar-width, 5%); }
+
+/* Dynamic transform via CSS custom property — keeps transform out of inline styles */
+.img-zoom-dynamic {
+  transform: var(--zoom-transform, scale(1));
+  transform-origin: var(--zoom-origin, center center);
+}
+
+/* ── Module 13: Route Progress Bar ─────────────────────────────────── */
+.route-progress-rail {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.route-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #8B4513;
+  box-shadow: 0 0 8px rgba(139, 69, 19, 0.6), 0 0 2px rgba(139, 69, 19, 0.8);
+  border-radius: 0 2px 2px 0;
+}
+
+.route-progress-glow {
+  position: absolute;
+  top: 0;
+  width: 80px;
+  height: 100%;
+  background: radial-gradient(ellipse at center, rgba(139, 69, 19, 0.4) 0%, transparent 70%);
+  transform: translateX(50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MODULE 14: MOBILE & ACCESSIBILITY IMPROVEMENTS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Skip navigation link (keyboard a11y) ──────────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0.5rem;
+  z-index: 10000;
+  padding: 0.5rem 1rem;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 0 0 0.375rem 0.375rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 0;
+  outline: 2px solid hsl(var(--primary-foreground));
+  outline-offset: 2px;
+}
+
+/* ── Global enhanced focus-visible ring ─────────────────────────────────── */
+/* Layered on top of Tailwind's built-in ring — ensures every interactive  */
+/* element has a visible default focus indicator for keyboard users.        */
+*:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+/* Buttons and links already include their own Tailwind focus classes;      */
+/* reset outline only for elements that Tailwind fully styles.              */
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Minimum touch target (44 × 44 px per WCAG 2.5.5) ──────────────────── */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Artisan Mobile Bottom Navigation ──────────────────────────────────── */
+.artisan-mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  background: hsl(var(--background) / 0.97);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid hsl(var(--border));
+  /* Safe-area inset for notched devices */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.artisan-mobile-nav__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.5rem 0.25rem;
+  min-height: 56px; /* comfortable touch target */
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.15s ease, background 0.15s ease;
+  border-radius: 0.375rem;
+  -webkit-tap-highlight-color: transparent;
+}
+.artisan-mobile-nav__item:hover,
+.artisan-mobile-nav__item:focus-visible {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.artisan-mobile-nav__item--active {
+  color: #ea580c; /* orange-600 — matches dashboard brand */
+}
+.artisan-mobile-nav__item--active .artisan-mobile-nav__label {
+  font-weight: 600;
+}
+
+.artisan-mobile-nav__label {
+  font-size: 0.625rem; /* 10px */
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.artisan-mobile-nav__badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  background: #ea580c;
+  color: #fff;
+  font-size: 0.5625rem; /* 9px */
+  font-weight: 700;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 1.5px solid hsl(var(--background));
+}
+
+/* ── High-contrast mode overrides ─────────────────────────────────────── */
+@media (prefers-contrast: more) {
+  /* Stronger border visibility */
+  .artisan-mobile-nav {
+    border-top: 2px solid hsl(var(--foreground));
+  }
+  .artisan-mobile-nav__item--active {
+    color: hsl(var(--foreground));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* Boost text contrast across cards */
+  .text-muted-foreground {
+    color: hsl(var(--foreground) / 0.75) !important;
+  }
+  /* Stronger focus rings */
+  *:focus-visible {
+    outline: 3px solid hsl(var(--foreground));
+    outline-offset: 3px;
+  }
+  /* Ensure status badges have enough contrast */
+  .artisan-mobile-nav__badge {
+    background: hsl(var(--foreground));
+    border-color: hsl(var(--background));
+  }
+  /* Skip link more visible */
+  .skip-link {
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
+  }
+}
+
+/* ── Reduced-motion overrides ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* Disable all CSS transitions and animations project-wide */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Keep the route progress bar but make it instant */
+  .route-progress-fill {
+    transition: none !important;
+  }
+  /* Disable sidebar slide animation */
+  [class*="translate-x"] {
+    transition: none !important;
+  }
+}
+
+/* ── Readable typography helpers ────────────────────────────────────────── */
+/* Comfortable line-height for long-form content blocks */
+.readable-text {
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+}
+/* Minimum font size guard for very small labels */
+.text-readable-min {
+  font-size: max(0.75rem, 12px);
 }

@@ -1,0 +1,423 @@
+{
+    "info": {
+        "_postman_id": "upi-payments-collection",
+        "name": "Zaymazone - UPI Prepaid Payments",
+        "description": "Complete API collection for testing UPI prepaid payment functionality including payment intent generation, QR code creation, admin verification, and status management.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            {
+                "key": "token",
+                "value": "{{auth_token}}",
+                "type": "string"
+            }
+        ]
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:4000",
+            "type": "string"
+        },
+        {
+            "key": "auth_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "admin_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "order_id",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "upi_payment_id",
+            "value": "",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "1. Generate UPI Payment Intent",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 201\", function () {",
+                            "    pm.response.to.have.status(201);",
+                            "});",
+                            "",
+                            "pm.test(\"Response has required fields\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('success');",
+                            "    pm.expect(jsonData).to.have.property('upiPaymentId');",
+                            "    pm.expect(jsonData).to.have.property('upiIntentUrl');",
+                            "    pm.expect(jsonData).to.have.property('qrCodeData');",
+                            "    pm.expect(jsonData).to.have.property('amount');",
+                            "    pm.expect(jsonData).to.have.property('orderNumber');",
+                            "});",
+                            "",
+                            "// Save upiPaymentId for next requests",
+                            "if (pm.response.code === 201) {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.collectionVariables.set(\"upi_payment_id\", jsonData.upiPaymentId);",
+                            "    console.log(\"Saved UPI Payment ID:\", jsonData.upiPaymentId);",
+                            "}"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"orderId\": \"{{order_id}}\",\n  \"amount\": 1500,\n  \"merchantUpiId\": \"merchant@paytm\",\n  \"expiryMinutes\": 30\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/generate-intent",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "generate-intent"
+                    ]
+                },
+                "description": "Generate UPI payment intent and QR code for an order. Returns UPI deep link and base64 QR code image."
+            },
+            "response": []
+        },
+        {
+            "name": "2. Verify UPI Payment (Admin)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Payment verified successfully\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.payment.paymentStatus).to.eql('verified');",
+                            "    pm.expect(jsonData.order.paymentStatus).to.eql('paid');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "auth": {
+                    "type": "bearer",
+                    "bearer": [
+                        {
+                            "key": "token",
+                            "value": "{{admin_token}}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"upiPaymentId\": \"{{upi_payment_id}}\",\n  \"utr\": \"123456789012\",\n  \"verificationNotes\": \"Payment verified manually via bank statement\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/verify",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "verify"
+                    ]
+                },
+                "description": "Verify UPI payment using UTR. Admin only endpoint. Validates UTR format, checks for duplicates, and updates both payment and order status."
+            },
+            "response": []
+        },
+        {
+            "name": "3. Update Payment Status (Admin)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Status updated successfully\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "auth": {
+                    "type": "bearer",
+                    "bearer": [
+                        {
+                            "key": "token",
+                            "value": "{{admin_token}}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "method": "PATCH",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"status\": \"failed\",\n  \"reason\": \"Payment not received within timeout period\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/{{upi_payment_id}}/status",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "{{upi_payment_id}}",
+                        "status"
+                    ]
+                },
+                "description": "Update payment status to failed, verified, or refunded. Admin only endpoint."
+            },
+            "response": []
+        },
+        {
+            "name": "4. Get Payment Details",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Payment details retrieved\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('_id');",
+                            "    pm.expect(jsonData).to.have.property('orderNumber');",
+                            "    pm.expect(jsonData).to.have.property('amount');",
+                            "    pm.expect(jsonData).to.have.property('paymentStatus');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/{{upi_payment_id}}",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "{{upi_payment_id}}"
+                    ]
+                },
+                "description": "Get UPI payment details by payment ID. Users can only view their own payments, admins can view any payment."
+            },
+            "response": []
+        },
+        {
+            "name": "5. Get Payments by Order",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Payments array returned\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('payments');",
+                            "    pm.expect(jsonData.payments).to.be.an('array');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/order/{{order_id}}",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "order",
+                        "{{order_id}}"
+                    ]
+                },
+                "description": "Get all UPI payments for a specific order. Useful for retry scenarios where multiple payment attempts may exist."
+            },
+            "response": []
+        },
+        {
+            "name": "6. List Pending Payments (Admin)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Pending payments list returned\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('payments');",
+                            "    pm.expect(jsonData).to.have.property('pagination');",
+                            "    pm.expect(jsonData.payments).to.be.an('array');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "auth": {
+                    "type": "bearer",
+                    "bearer": [
+                        {
+                            "key": "token",
+                            "value": "{{admin_token}}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/pending?page=1&limit=20",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "pending"
+                    ],
+                    "query": [
+                        {
+                            "key": "page",
+                            "value": "1"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "20"
+                        }
+                    ]
+                },
+                "description": "List all pending UPI payments awaiting verification. Admin only endpoint with pagination support."
+            },
+            "response": []
+        },
+        {
+            "name": "7. Process Refund (Admin)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Refund processed successfully\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.payment.paymentStatus).to.eql('refunded');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "auth": {
+                    "type": "bearer",
+                    "bearer": [
+                        {
+                            "key": "token",
+                            "value": "{{admin_token}}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "method": "PATCH",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"status\": \"refunded\",\n  \"refundAmount\": 1500,\n  \"reason\": \"Customer requested refund - product not as described\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/upi-payments/{{upi_payment_id}}/status",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "upi-payments",
+                        "{{upi_payment_id}}",
+                        "status"
+                    ]
+                },
+                "description": "Process refund for a verified payment. Admin only endpoint. Updates payment status to refunded and records refund details."
+            },
+            "response": []
+        }
+    ]
+}

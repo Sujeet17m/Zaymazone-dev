@@ -9,6 +9,9 @@ const userSchema = new mongoose.Schema({
 	role: { type: String, enum: ['user', 'artisan', 'admin'], default: 'user' },
 	avatar: { type: String, default: '' },
 	phone: { type: String, trim: true },
+	// Address is fully optional — NOT required at login/registration.
+	// It is only collected and validated during the checkout process.
+	// Existing users without an address are handled gracefully (sub-document is undefined).
 	address: {
 		street: { type: String, trim: true },
 		city: { type: String, trim: true },
@@ -20,7 +23,7 @@ const userSchema = new mongoose.Schema({
 	emailVerificationToken: { type: String },
 	passwordResetToken: { type: String },
 	passwordResetExpires: { type: Date },
-	refreshTokens: [{ 
+	refreshTokens: [{
 		token: { type: String, required: true },
 		createdAt: { type: Date, default: Date.now },
 		expiresAt: { type: Date, required: true },
@@ -34,6 +37,15 @@ const userSchema = new mongoose.Schema({
 	lastLogin: { type: Date },
 	isActive: { type: Boolean, default: true }
 }, { timestamps: true })
+
+// Virtual for checking admin status
+userSchema.virtual('isAdmin').get(function () {
+	return this.role === 'admin'
+})
+
+// Ensure virtuals are included in JSON
+userSchema.set('toJSON', { virtuals: true })
+userSchema.set('toObject', { virtuals: true })
 
 // Indexes for performance
 userSchema.index({ email: 1, isActive: 1 })

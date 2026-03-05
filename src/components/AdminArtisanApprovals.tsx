@@ -525,14 +525,54 @@ export function AdminArtisanApprovals() {
                         <h3 className="text-sm font-semibold text-orange-800 dark:text-orange-200 mb-1">
                           Artisan Changed Details After Approval
                         </h3>
-                        <p className="text-sm text-orange-700 dark:text-orange-300 mb-2">
-                          Changed fields: <span className="font-medium">{selectedArtisan.pendingChanges.changedFields.join(', ')}</span>
-                        </p>
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {selectedArtisan.pendingChanges.changedFields.map((field) => (
+                            <span
+                              key={field}
+                              className="inline-block bg-orange-100 text-orange-700 border border-orange-300 rounded px-2 py-0.5 text-xs font-medium"
+                            >
+                              {field}
+                            </span>
+                          ))}
+                        </div>
+                        {selectedArtisan.pendingChanges.changes &&
+                          Object.keys(selectedArtisan.pendingChanges.changes).length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            <p className="text-xs font-semibold text-orange-800 dark:text-orange-200">New values:</p>
+                            {Object.entries(selectedArtisan.pendingChanges.changes).map(([key, value]) => (
+                              <p key={key} className="text-xs text-orange-700 dark:text-orange-300">
+                                <span className="font-medium capitalize">{key.replace(/([A-Z])/g, ' $1')}: </span>
+                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                              </p>
+                            ))}
+                          </div>
+                        )}
                         {selectedArtisan.pendingChanges.changedAt && (
-                          <p className="text-xs text-orange-600 dark:text-orange-400">
+                          <p className="text-xs text-orange-600 dark:text-orange-400 mt-2">
                             Changed on: {new Date(selectedArtisan.pendingChanges.changedAt).toLocaleString()}
                           </p>
                         )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-3 border-orange-400 text-orange-700 hover:bg-orange-100"
+                          onClick={async () => {
+                            try {
+                              await apiRequest(
+                                `/api/admin/artisans/${selectedArtisan._id}/acknowledge-changes`,
+                                { method: 'PATCH', auth: true }
+                              );
+                              toast({ title: 'Changes marked as reviewed' });
+                              setShowDetailDialog(false);
+                              fetchArtisans(activeTab, pagination.page);
+                            } catch {
+                              toast({ title: 'Error', description: 'Could not mark changes as reviewed', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Mark as Reviewed
+                        </Button>
                       </div>
                     </div>
                   </div>

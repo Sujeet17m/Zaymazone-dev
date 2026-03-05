@@ -158,7 +158,7 @@ export const Footer = () => {
               
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button variant="outline" className="border-primary/30 text-primary hover:bg-primary/5 px-6 py-6 text-lg rounded-xl dark:border-primary/40 dark:text-primary dark:hover:bg-primary/10 dark:hover:shadow-dark-glow" asChild>
-                  <Link to="/success-stories">View Success Stories</Link>
+                  <Link to="/artisans">View Success Stories</Link>
                 </Button>
               </motion.div>
             </div>
@@ -290,7 +290,7 @@ export const Footer = () => {
               <div className="flex items-center gap-4">
                 <Link to="/terms" className="hover:text-primary transition-colors dark:hover:text-primary">Terms</Link>
                 <Link to="/privacy" className="hover:text-primary transition-colors dark:hover:text-primary">Privacy</Link>
-                <Link to="/cookies" className="hover:text-primary transition-colors dark:hover:text-primary">Cookies</Link>
+                <Link to="/privacy" className="hover:text-primary transition-colors dark:hover:text-primary">Cookies</Link>
               </div>
             </div>
             

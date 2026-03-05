@@ -52,7 +52,9 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLogin }) => {
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 placeholder="admin@zaymazone.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -64,7 +66,9 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLogin }) => {
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
+                name="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

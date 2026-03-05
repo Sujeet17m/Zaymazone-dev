@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,14 +14,30 @@ const SignUp = () => {
     name: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    phone: '',
+    street: '',
+    city: '',
+    state: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { signUp, signInWithGoogle } = useAuth();
+  const { signUp, signInWithGoogle, updateUserProfile, user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Redirect already-authenticated users away from sign-up
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && user) {
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      const home = user.role === 'admin' ? '/admin'
+        : user.role === 'artisan' ? '/artisan-dashboard'
+        : '/dashboard';
+      navigate(from || home, { replace: true });
+    }
+  }, [authLoading, isAuthenticated, user, location.state, navigate]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -56,9 +72,30 @@ const SignUp = () => {
     try {
       setIsLoading(true);
       await signUp(formData.email, formData.password, formData.name, 'user');
-      navigate('/dashboard');
-    } catch (error) {
+      // Save optional phone + address right after account creation
+      const hasExtra = formData.phone || formData.street || formData.city || formData.state;
+      if (hasExtra) {
+        await updateUserProfile({
+          phone: formData.phone || undefined,
+          address: {
+            street: formData.street || '',
+            city: formData.city || '',
+            state: formData.state || '',
+            zipCode: '',
+            country: 'India'
+          }
+        });
+      }
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      navigate(from || '/dashboard', { replace: true });
+    } catch (error: unknown) {
+      // AuthContext already toasts a friendly message for Firebase auth errors.
+      // Only show an extra toast for non-auth failures (e.g. profile update).
       console.error('Sign up error:', error);
+      const msg = error instanceof Error ? error.message : '';
+      if (msg && !msg.startsWith('Firebase:')) {
+        toast.error(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -73,10 +110,11 @@ const SignUp = () => {
     try {
       setIsLoading(true);
       await signInWithGoogle('user');
-      navigate('/dashboard');
-    } catch (error: any) {
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      navigate(from || '/dashboard', { replace: true });
+    } catch (error: unknown) {
       console.error('Google sign up error:', error);
-      if (error.code === 'auth/unauthorized-domain') {
+      if (error instanceof Error && (error as Error & { code?: string }).code === 'auth/unauthorized-domain') {
         toast.error('Google Sign-Up is not available in this environment. Please use email/password sign-up.');
       }
     } finally {
@@ -193,6 +231,53 @@ const SignUp = () => {
                 >
                   {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="phone">Phone Number <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <div className="mt-1 relative">
+                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
+                <Input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  placeholder="+91 98765 43210"
+                  className="pl-10"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="city">City <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <div className="mt-1 relative">
+                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <Input
+                    id="city"
+                    name="city"
+                    type="text"
+                    value={formData.city}
+                    onChange={handleChange}
+                    placeholder="Mumbai"
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="state">State <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <div className="mt-1">
+                  <Input
+                    id="state"
+                    name="state"
+                    type="text"
+                    value={formData.state}
+                    onChange={handleChange}
+                    placeholder="Maharashtra"
+                  />
+                </div>
               </div>
             </div>
 

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ShoppingCart,
@@ -21,11 +21,17 @@ import {
   XCircle,
   Clock,
   AlertCircle,
-  DollarSign
+  DollarSign,
+  Ban,
+  MessageSquare
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
+import { PaymentMethodBadge } from '@/components/PaymentMethodBadge';
 import type { Order } from '@/lib/api';
+import { AcceptOrderModal } from '@/components/artisan/AcceptOrderModal';
+import { RejectionReasonModal } from '@/components/artisan/RejectionReasonModal';
+import { CancelOrderModal } from '@/components/artisan/CancelOrderModal';
 
 interface ArtisanOrder {
   _id: string;
@@ -68,12 +74,22 @@ const ArtisanOrders = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isOrderDetailOpen, setIsOrderDetailOpen] = useState(false);
 
+  // Accept / Reject order modals
+  const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
+  const [orderToAccept, setOrderToAccept] = useState<Order | null>(null);
+  const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+  const [orderToReject, setOrderToReject] = useState<Order | null>(null);
+
+  // Cancel order modal
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
+
   const loadOrders = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     if (silent) setRefreshing(true);
 
     try {
-      const response = await api.getArtisanOrders();
+      const response = await api.artisanDashboard.getOrders({ limit: 100 });
       setOrders(response.orders);
     } catch (error) {
       console.error('Failed to load orders:', error);
@@ -107,7 +123,7 @@ const ArtisanOrders = () => {
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         order.shippingAddress.fullName.toLowerCase().includes(searchTerm.toLowerCase());
+      (order.shippingAddress?.fullName ?? '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = selectedStatus === 'all' || order.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
@@ -139,6 +155,7 @@ const ArtisanOrders = () => {
       out_for_delivery: 'bg-cyan-100 text-cyan-800 border-cyan-200',
       delivered: 'bg-green-100 text-green-800 border-green-200',
       cancelled: 'bg-red-100 text-red-800 border-red-200',
+      rejected: 'bg-red-100 text-red-900 border-red-300',
       returned: 'bg-gray-100 text-gray-800 border-gray-200',
       refunded: 'bg-pink-100 text-pink-800 border-pink-200',
     };
@@ -155,6 +172,7 @@ const ArtisanOrders = () => {
       out_for_delivery: Truck,
       delivered: CheckCircle,
       cancelled: XCircle,
+      rejected: Ban,
       returned: AlertCircle,
       refunded: DollarSign,
     };
@@ -164,6 +182,21 @@ const ArtisanOrders = () => {
   const handleViewOrder = (order: Order) => {
     setSelectedOrder(order);
     setIsOrderDetailOpen(true);
+  };
+
+  const openAcceptDialog = (order: Order) => {
+    setOrderToAccept(order);
+    setIsAcceptModalOpen(true);
+  };
+
+  const openRejectDialog = (order: Order) => {
+    setOrderToReject(order);
+    setIsRejectDialogOpen(true);
+  };
+
+  const openCancelDialog = (order: Order) => {
+    setOrderToCancel(order);
+    setIsCancelModalOpen(true);
   };
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
@@ -337,6 +370,7 @@ const ArtisanOrders = () => {
               <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
               <SelectItem value="delivered">Delivered</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
               <SelectItem value="returned">Returned</SelectItem>
               <SelectItem value="refunded">Refunded</SelectItem>
             </SelectContent>
@@ -387,13 +421,51 @@ const ArtisanOrders = () => {
                         <span>{order.items.length} item{order.items.length !== 1 ? 's' : ''}</span>
                         <span>•</span>
                         <span>{order.shippingAddress.city}, {order.shippingAddress.state}</span>
+                        <span>•</span>
+                        <PaymentMethodBadge method={order.paymentMethod} />
                       </div>
                       <div className="flex space-x-2">
                         <Button variant="outline" size="sm" onClick={() => handleViewOrder(order)}>
                           <Eye className="w-4 h-4 mr-2" />
                           View Details
                         </Button>
-                        {order.status !== 'delivered' && order.status !== 'cancelled' && (
+                        {/* Accept button — only for newly placed orders */}
+                        {order.status === 'placed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-green-300 text-green-700 hover:bg-green-50 hover:border-green-400"
+                            onClick={() => openAcceptDialog(order)}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Accept
+                          </Button>
+                        )}
+                        {/* Reject button — only for pre-shipment rejectable statuses */}
+                        {['placed', 'confirmed', 'processing'].includes(order.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                            onClick={() => openRejectDialog(order)}
+                          >
+                            <Ban className="w-4 h-4 mr-2" />
+                            Reject
+                          </Button>
+                        )}
+                        {/* Cancel button (with reason) — for confirmed/processing/packed */}
+                        {['confirmed', 'processing', 'packed'].includes(order.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-orange-300 text-orange-700 hover:bg-orange-50 hover:border-orange-400"
+                            onClick={() => openCancelDialog(order)}
+                          >
+                            <XCircle className="w-4 h-4 mr-2" />
+                            Cancel
+                          </Button>
+                        )}
+                        {order.status !== 'delivered' && order.status !== 'cancelled' && order.status !== 'rejected' && (
                           <Select
                             value={order.status}
                             onValueChange={(value) => handleUpdateOrderStatus(order._id, value)}
@@ -500,38 +572,123 @@ const ArtisanOrders = () => {
                   <CardHeader>
                     <CardTitle className="text-lg">Order Status</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center space-x-2">
                         <Badge className={getStatusColor(selectedOrder.status)}>
                           {selectedOrder.status.replace('_', ' ')}
                         </Badge>
                       </div>
-                      {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
-                        <Select
-                          value={selectedOrder.status}
-                          onValueChange={(value) => handleUpdateOrderStatus(selectedOrder._id, value)}
-                        >
-                          <SelectTrigger className="w-[160px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="confirmed">Confirm Order</SelectItem>
-                            <SelectItem value="processing">Processing</SelectItem>
-                            <SelectItem value="packed">Packed</SelectItem>
-                            <SelectItem value="shipped">Shipped</SelectItem>
-                            <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
-                            <SelectItem value="delivered">Delivered</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {/* Accept button — only for newly placed orders */}
+                        {selectedOrder.status === 'placed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-green-300 text-green-700 hover:bg-green-50 hover:border-green-400"
+                            onClick={() => openAcceptDialog(selectedOrder)}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Accept Order
+                          </Button>
+                        )}
+                        {/* Reject button — only for pre-shipment states */}
+                        {['placed', 'confirmed', 'processing'].includes(selectedOrder.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                            onClick={() => openRejectDialog(selectedOrder)}
+                          >
+                            <Ban className="w-4 h-4 mr-2" />
+                            Reject Order
+                          </Button>
+                        )}
+                        {/* Cancel button (with reason) — for confirmed/processing/packed */}
+                        {['confirmed', 'processing', 'packed'].includes(selectedOrder.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-orange-300 text-orange-700 hover:bg-orange-50 hover:border-orange-400"
+                            onClick={() => openCancelDialog(selectedOrder)}
+                          >
+                            <XCircle className="w-4 h-4 mr-2" />
+                            Cancel Order
+                          </Button>
+                        )}
+                        {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'rejected' && (
+                          <Select
+                            value={selectedOrder.status}
+                            onValueChange={(value) => handleUpdateOrderStatus(selectedOrder._id, value)}
+                          >
+                            <SelectTrigger className="w-[160px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="confirmed">Confirm Order</SelectItem>
+                              <SelectItem value="processing">Processing</SelectItem>
+                              <SelectItem value="packed">Packed</SelectItem>
+                              <SelectItem value="shipped">Shipped</SelectItem>
+                              <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
+                              <SelectItem value="delivered">Delivered</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Show stored rejection reason if already rejected */}
+                    {selectedOrder.status === 'rejected' && (selectedOrder as any).rejectionReason && (
+                      <div className="flex items-start gap-2 p-3 rounded-md bg-red-50 border border-red-200">
+                        <MessageSquare className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-red-700 mb-0.5">Rejection Reason</p>
+                          <p className="text-sm text-red-600">{(selectedOrder as any).rejectionReason}</p>
+                          {(selectedOrder as any).rejectedAt && (
+                            <p className="text-xs text-red-400 mt-1">
+                              Rejected on {formatDate((selectedOrder as any).rejectedAt)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {/* Show cancellation reason if cancelled */}
+                    {selectedOrder.status === 'cancelled' && selectedOrder.cancellationReason && (
+                      <div className="flex items-start gap-2 p-3 rounded-md bg-orange-50 border border-orange-200">
+                        <MessageSquare className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-orange-700 mb-0.5">Cancellation Reason</p>
+                          <p className="text-sm text-orange-600">{selectedOrder.cancellationReason}</p>
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Module 7: Accept / Reject order modals */}
+        <AcceptOrderModal
+          open={isAcceptModalOpen}
+          order={orderToAccept}
+          onClose={() => { setIsAcceptModalOpen(false); setOrderToAccept(null); }}
+          onAccepted={() => { setIsOrderDetailOpen(false); loadOrders(); }}
+        />
+        <RejectionReasonModal
+          open={isRejectDialogOpen}
+          order={orderToReject}
+          onClose={() => { setIsRejectDialogOpen(false); setOrderToReject(null); }}
+          onRejected={() => { setIsRejectDialogOpen(false); setIsOrderDetailOpen(false); loadOrders(); }}
+        />
+        <CancelOrderModal
+          open={isCancelModalOpen}
+          order={orderToCancel}
+          onClose={() => { setIsCancelModalOpen(false); setOrderToCancel(null); }}
+          onCancelled={() => { setIsCancelModalOpen(false); setIsOrderDetailOpen(false); loadOrders(); }}
+        />
+
       </main>
 
       <Footer />

@@ -4,16 +4,108 @@ import Product from '../models/Product.js'
 import Order from '../models/Order.js'
 import Artisan from '../models/Artisan.js'
 import User from '../models/User.js'
+import emailService from '../services/emailService.js'
+import invoiceService from '../services/invoiceService.js'
+import dashboardService from '../services/artisanDashboardService.js'
 import { requireAuth, optionalAuth } from '../middleware/auth.js'
 import { authenticateToken } from '../middleware/firebase-auth.js'
 
 const router = Router()
 
+/**
+ * Resolve the Artisan document for the authenticated user.
+ *
+ * Primary lookup:  Artisan.userId === req.user._id  (normal path)
+ * Fallback lookup: Artisan.email === req.user.email  (handles accounts created
+ *   via seller-onboarding form before Firebase auth was wired up, where a
+ *   separate User document was created from the form email and then a brand-new
+ *   Firebase User is created on first Firebase login with a different/new account)
+ *
+ * When the fallback matches, the userId field is healed so subsequent requests
+ * hit the fast primary path.
+ */
+async function getArtisanForRequest(req) {
+	// Primary: user._id → artisan.userId
+	let artisan = await Artisan.findOne({ userId: req.user._id })
+	if (artisan) return artisan
+
+	// Fallback: match by email (covers legacy / onboarding-created accounts)
+	const email = (req.user.email || req.firebaseUser?.email || '').toLowerCase().trim()
+	if (email) {
+		artisan = await Artisan.findOne({ email })
+		if (artisan) {
+			// Heal the broken userId link so the primary path works next time
+			console.log(`[seller] Healing artisan.userId for ${email}: ${artisan.userId} → ${req.user._id}`)
+			artisan.userId = req.user._id
+			await artisan.save()
+			return artisan
+		}
+	}
+
+	// Auto-create a minimal stub. This function is ONLY called from /api/seller/*
+	// routes so any authenticated user reaching here is acting as a seller.
+	console.log(`[seller] No artisan profile for user ${req.user._id} (${email}, role:${req.user.role}) — auto-creating stub`)
+	try {
+		artisan = await Artisan.create({
+			userId:         req.user._id,
+			name:           req.user.name || email.split('@')[0] || 'Artisan',
+			email:          email || undefined,
+			location:       { city: 'India', state: 'India', country: 'India' },
+			approvalStatus: 'pending',
+			isActive:       true,
+		})
+		return artisan
+	} catch (createErr) {
+		// Race condition: another concurrent request created it first — fetch and return it
+		if (createErr.code === 11000) {
+			return Artisan.findOne({ userId: req.user._id })
+		}
+		console.error('[seller] Failed to auto-create artisan stub:', createErr.message)
+	}
+
+	return null
+}
+
+// ============= SELLER DASHBOARD STATS =============
+
+// ─── Module 2: Comprehensive Dashboard Bundle ────────────────────────────────
+// GET /api/seller/dashboard?period=30days
+router.get('/dashboard', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
+
+		const period = (['7days', '30days', '90days', '1year'].includes(req.query.period))
+			? req.query.period : '30days'
+
+		const bundle = await dashboardService.getDashboardBundle(artisan._id, period)
+		res.json(bundle)
+	} catch (err) {
+		console.error('[Module2] Dashboard bundle error:', err)
+		res.status(500).json({ error: 'Failed to load dashboard data' })
+	}
+})
+
+// ─── Module 2: Order Counts ──────────────────────────────────────────────────
+// GET /api/seller/orders/counts
+router.get('/orders/counts', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
+
+		const counts = await dashboardService.getOrderCounts(artisan._id)
+		res.json(counts)
+	} catch (err) {
+		console.error('[Module2] Order counts error:', err)
+		res.status(500).json({ error: 'Failed to fetch order counts' })
+	}
+})
+
 // ============= SELLER DASHBOARD STATS =============
 router.get('/stats', authenticateToken, async (req, res) => {
 	try {
 		// Find artisan by userId
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -32,11 +124,11 @@ router.get('/stats', authenticateToken, async (req, res) => {
 		] = await Promise.all([
 			Product.countDocuments({ artisanId, isActive: true }),
 			Product.countDocuments({ artisanId, isActive: true, inStock: true }),
-			Order.countDocuments({ 'items.productArtisan': artisanId }),
-			Order.countDocuments({ 'items.productArtisan': artisanId, status: 'delivered' }),
+			Order.countDocuments({ 'items.artisanId': artisanId }),
+			Order.countDocuments({ 'items.artisanId': artisanId, status: 'delivered' }),
 			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisanId, status: 'delivered' } },
-				{ $group: { _id: null, total: { $sum: '$totalAmount' } } }
+				{ $match: { 'items.artisanId': artisanId, status: 'delivered' } },
+				{ $group: { _id: null, total: { $sum: '$total' } } }
 			]),
 			Product.aggregate([
 				{ $match: { artisanId } },
@@ -74,7 +166,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
 // Get seller's products
 router.get('/products', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -129,7 +221,7 @@ router.get('/products', authenticateToken, async (req, res) => {
 // Create product
 router.post('/products', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -203,7 +295,7 @@ router.post('/products', authenticateToken, async (req, res) => {
 // Get single product
 router.get('/products/:id', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -227,7 +319,7 @@ router.get('/products/:id', authenticateToken, async (req, res) => {
 // Update product
 router.put('/products/:id', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -258,7 +350,7 @@ router.put('/products/:id', authenticateToken, async (req, res) => {
 // Delete/deactivate product
 router.delete('/products/:id', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -284,7 +376,7 @@ router.delete('/products/:id', authenticateToken, async (req, res) => {
 // Get seller's orders
 router.get('/orders', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -293,7 +385,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
 		const limit = parseInt(req.query.limit) || 10
 		const status = req.query.status || 'all'
 
-		let query = { 'items.productArtisan': artisan._id }
+		let query = { 'items.artisanId': artisan._id }
 
 		if (status !== 'all') {
 			query.status = status
@@ -328,14 +420,14 @@ router.get('/orders', authenticateToken, async (req, res) => {
 // Get single order
 router.get('/orders/:id', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
 
 		const order = await Order.findOne({
 			_id: req.params.id,
-			'items.productArtisan': artisan._id
+			'items.artisanId': artisan._id
 		}).populate('userId', 'name email phone address')
 
 		if (!order) {
@@ -352,21 +444,43 @@ router.get('/orders/:id', authenticateToken, async (req, res) => {
 // Update order status
 router.patch('/orders/:id/status', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
 
-		const { status } = req.body
+		const { status, reason, note } = req.body
 
-		const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+		const validStatuses = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']
 		if (!validStatuses.includes(status)) {
 			return res.status(400).json({ error: 'Invalid status' })
 		}
 
+		// Require a reason when artisan cancels the order
+		if (status === 'cancelled' && !reason) {
+			return res.status(400).json({ error: 'A cancellation reason is required when cancelling an order' })
+		}
+
+		const updateFields = { status, updatedAt: new Date() }
+		if (status === 'cancelled') {
+			updateFields.cancellationReason = reason
+			updateFields.cancelledAt = new Date()
+		}
+
 		const order = await Order.findOneAndUpdate(
-			{ _id: req.params.id, 'items.productArtisan': artisan._id },
-			{ status, updatedAt: new Date() },
+			{ _id: req.params.id, 'items.artisanId': artisan._id },
+			{
+				...updateFields,
+				$push: {
+					statusHistory: {
+						status,
+						timestamp: new Date(),
+						note: status === 'cancelled'
+							? `Cancelled by artisan. Reason: ${reason}${note ? ` — ${note}` : ''}`
+							: note || undefined
+					}
+				}
+			},
 			{ new: true }
 		)
 
@@ -384,11 +498,224 @@ router.patch('/orders/:id/status', authenticateToken, async (req, res) => {
 	}
 })
 
-// ============= PROFILE MANAGEMENT =============
+// ─── Module 2: Accept / Confirm order ───────────────────────────────────────
+// POST /api/seller/orders/:id/accept
+const acceptOrderSchema = z.object({
+	note: z.string().max(300).optional()
+})
+
+router.post('/orders/:id/accept', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
+
+		const parsed = acceptOrderSchema.safeParse(req.body)
+		if (!parsed.success) {
+			return res.status(400).json({
+				error: 'Invalid request body',
+				details: parsed.error.errors.map(e => e.message)
+			})
+		}
+		const { note } = parsed.data
+
+		// Find order belonging to this artisan
+		const order = await Order.findOne({
+			_id: req.params.id,
+			'items.artisanId': artisan._id
+		}).populate('userId', 'name email')
+
+		if (!order) {
+			return res.status(404).json({ error: 'Order not found or does not belong to you' })
+		}
+
+		// Only placed orders can be accepted
+		if (order.status !== 'placed') {
+			return res.status(400).json({
+				error: `Cannot accept an order with status "${order.status}". Only placed orders can be accepted.`
+			})
+		}
+
+		order.status = 'confirmed'
+		order.statusHistory.push({
+			status: 'confirmed',
+			timestamp: new Date(),
+			note: note || 'Order accepted and confirmed by seller'
+		})
+		await order.save()
+
+		// Send buyer notification (non-blocking)
+		if (order.userId?.email) {
+			setImmediate(async () => {
+				try {
+					await emailService.sendOrderConfirmation?.(order, order.userId)
+				} catch (emailErr) {
+					console.error('[Module2] Accept order email error:', emailErr)
+				}
+			})
+		}
+
+		console.log(`[Module2] Order ${order.orderNumber} accepted by artisan ${artisan._id}`)
+
+		res.json({
+			message: 'Order accepted successfully',
+			order: {
+				_id:         order._id,
+				orderNumber: order.orderNumber,
+				status:      order.status,
+				acceptedAt:  new Date().toISOString()
+			}
+		})
+	} catch (err) {
+		console.error('[Module2] Accept order error:', err)
+		res.status(500).json({ error: 'Failed to accept order' })
+	}
+})
+
+// ── Module 4: Reject Order with mandatory reason ─────────────────────────────
+const rejectOrderSchema = z.object({
+	reason: z.string().min(10, 'Rejection reason must be at least 10 characters').max(500, 'Rejection reason cannot exceed 500 characters'),
+	predefinedCategory: z.enum([
+		// Frontend category values (canonical)
+		'out_of_stock',
+		'shipping_address_issue',
+		'price_discrepancy',
+		'damaged_item',
+		'buyer_fraud',
+		'craft_error',
+		'other',
+		// Legacy values kept for backward compatibility
+		'cannot_fulfill',
+		'pricing_issue',
+		'shipping_not_available',
+		'product_discontinued',
+		'custom_work_unavailable',
+	]).optional()
+})
+
+// POST /api/seller/orders/:id/reject
+router.post('/orders/:id/reject', authenticateToken, async (req, res) => {
+	try {
+		// 1. Resolve artisan
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) {
+			return res.status(404).json({ error: 'Artisan profile not found' })
+		}
+
+		// 2. Validate rejection reason (mandatory)
+		const parsed = rejectOrderSchema.safeParse(req.body)
+		if (!parsed.success) {
+			return res.status(400).json({
+				error: 'Rejection reason is required',
+				details: parsed.error.errors.map(e => e.message)
+			})
+		}
+		const { reason, predefinedCategory } = parsed.data
+
+		// 3. Find the order — must contain an item from this artisan
+		const order = await Order.findOne({
+			_id: req.params.id,
+			'items.artisanId': artisan._id
+		}).populate('userId', 'name email')
+
+		if (!order) {
+			return res.status(404).json({ error: 'Order not found or does not belong to you' })
+		}
+
+		// 4. Guard: only rejectable states
+		const rejectableStatuses = ['placed', 'confirmed', 'processing']
+		if (!rejectableStatuses.includes(order.status)) {
+			return res.status(400).json({
+				error: `Cannot reject an order with status "${order.status}". Only placed, confirmed, or processing orders can be rejected.`
+			})
+		}
+
+		// 5. Update the order
+		const fullReason = predefinedCategory
+			? `[${predefinedCategory.replace(/_/g, ' ')}] ${reason}`
+			: reason
+
+		order.status = 'rejected'
+		order.rejectionReason = fullReason
+		order.rejectedBy = artisan._id
+		order.rejectedAt = new Date()
+		order.statusHistory.push({
+			status: 'rejected',
+			timestamp: new Date(),
+			note: `Seller rejected order. Reason: ${fullReason}`
+		})
+
+		await order.save()
+
+		// ── Module 3: Generate rejection note (non-blocking) ──────────────────
+		setImmediate(async () => {
+			try {
+				await invoiceService.generateRejectionNote(order)
+			} catch (invErr) {
+				console.error('[invoiceService] Failed to generate rejection note:', invErr)
+			}
+		})
+
+		// 6. Send email notification to buyer (non-blocking)
+		if (order.userId && order.userId.email) {
+			setImmediate(async () => {
+				try {
+					await emailService.sendOrderRejectionNotification(order, order.userId, fullReason)
+				} catch (emailErr) {
+					console.error('Failed to send rejection email:', emailErr)
+				}
+			})
+		}
+
+		console.log(`[Module4] Order ${order.orderNumber} rejected by artisan ${artisan._id}. Reason: ${fullReason}`)
+
+		res.json({
+			message: 'Order rejected successfully',
+			order: {
+				_id: order._id,
+				orderNumber: order.orderNumber,
+				status: order.status,
+				rejectionReason: order.rejectionReason,
+				rejectedAt: order.rejectedAt
+			}
+		})
+	} catch (error) {
+		console.error('Reject order error:', error)
+		res.status(500).json({ error: 'Failed to reject order' })
+	}
+})
+
+// GET /api/seller/orders/:id/rejection-reason — retrieve stored rejection reason
+router.get('/orders/:id/rejection-reason', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) {
+			return res.status(404).json({ error: 'Artisan profile not found' })
+		}
+
+		const order = await Order.findOne(
+			{ _id: req.params.id, 'items.artisanId': artisan._id },
+			'orderNumber status rejectionReason rejectedAt'
+		)
+
+		if (!order) {
+			return res.status(404).json({ error: 'Order not found' })
+		}
+
+		res.json({
+			orderNumber: order.orderNumber,
+			status: order.status,
+			rejectionReason: order.rejectionReason || null,
+			rejectedAt: order.rejectedAt || null
+		})
+	} catch (error) {
+		console.error('Get rejection reason error:', error)
+		res.status(500).json({ error: 'Failed to fetch rejection reason' })
+	}
+})
 // Get seller profile
 router.get('/profile', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -459,7 +786,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
 // Get sales analytics with period support
 router.get('/analytics/sales', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -478,7 +805,7 @@ router.get('/analytics/sales', authenticateToken, async (req, res) => {
 		const salesData = await Order.aggregate([
 			{
 				$match: {
-					'items.productArtisan': artisan._id,
+					'items.artisanId': artisan._id,
 					createdAt: { $gte: dateRange }
 				}
 			},
@@ -487,9 +814,9 @@ router.get('/analytics/sales', authenticateToken, async (req, res) => {
 					_id: {
 						$dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
 					},
-					sales: { $sum: 1 },
-					revenue: { $sum: '$totalAmount' },
-					orders: { $sum: 1 }
+					sales:   { $sum: 1 },
+					revenue: { $sum: '$total' },
+					orders:  { $sum: 1 }
 				}
 			},
 			{ $sort: { _id: 1 } }
@@ -509,7 +836,7 @@ router.get('/analytics/sales', authenticateToken, async (req, res) => {
 // Get product performance
 router.get('/analytics/products', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -527,61 +854,75 @@ router.get('/analytics/products', authenticateToken, async (req, res) => {
 })
 
 // ============= ADVANCED ANALYTICS =============
-// Get revenue summary
+// ─── Module 2: Revenue Analytics (enhanced, fixes totalAmount bug) ──────────
+// GET /api/seller/analytics/revenue?period=30days
 router.get('/analytics/revenue', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
-		if (!artisan) {
-			return res.status(404).json({ error: 'Artisan profile not found' })
-		}
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
 
-		const [totalRevenue, monthlyRevenue, pendingRevenue] = await Promise.all([
-			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisan._id, status: 'delivered' } },
-				{ $group: { _id: null, total: { $sum: '$totalAmount' } } }
-			]),
-			Order.aggregate([
-				{
-					$match: {
-						'items.productArtisan': artisan._id,
-						status: 'delivered',
-						createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-					}
-				},
-				{ $group: { _id: null, total: { $sum: '$totalAmount' } } }
-			]),
-			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisan._id, status: { $in: ['pending', 'processing'] } } },
-				{ $group: { _id: null, total: { $sum: '$totalAmount' } } }
-			])
-		])
+		const period = (['7days', '30days', '90days', '1year'].includes(req.query.period))
+			? req.query.period : '30days'
 
-		res.json({
-			totalRevenue: totalRevenue[0]?.total || 0,
-			monthlyRevenue: monthlyRevenue[0]?.total || 0,
-			pendingRevenue: pendingRevenue[0]?.total || 0
-		})
-	} catch (error) {
-		console.error('Revenue analytics error:', error)
+		const summary = await dashboardService.getRevenueSummary(artisan._id, period)
+		res.json(summary)
+	} catch (err) {
+		console.error('[Module2] Revenue analytics error:', err)
 		res.status(500).json({ error: 'Failed to fetch revenue analytics' })
 	}
 })
 
+// ─── Module 2: Revenue Trend ─────────────────────────────────────────────────
+// GET /api/seller/analytics/revenue/trend?period=30days
+router.get('/analytics/revenue/trend', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
+
+		const period = (['7days', '30days', '90days', '1year'].includes(req.query.period))
+			? req.query.period : '30days'
+
+		const trend = await dashboardService.getRevenueTrend(artisan._id, period)
+		res.json({ trend, period })
+	} catch (err) {
+		console.error('[Module2] Revenue trend error:', err)
+		res.status(500).json({ error: 'Failed to fetch revenue trend' })
+	}
+})
+
+// ─── Module 2: Performance Metrics ──────────────────────────────────────────
+// GET /api/seller/analytics/performance
+router.get('/analytics/performance', authenticateToken, async (req, res) => {
+	try {
+		const artisan = await getArtisanForRequest(req)
+		if (!artisan) return res.status(404).json({ error: 'Artisan profile not found' })
+
+		const metrics = await dashboardService.getPerformanceMetrics(artisan._id)
+		res.json(metrics)
+	} catch (err) {
+		console.error('[Module2] Performance metrics error:', err)
+		res.status(500).json({ error: 'Failed to fetch performance metrics' })
+	}
+})
+
+// Get revenue summary (legacy — superseded by Module 2 endpoint above; kept for backwards compatibility)
+// OLD: router.get('/analytics/revenue', ...) — replaced above
+
 // Get order status breakdown
 router.get('/analytics/orders-status', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
 
 		const statusBreakdown = await Order.aggregate([
-			{ $match: { 'items.productArtisan': artisan._id } },
+			{ $match: { 'items.artisanId': artisan._id } },
 			{
 				$group: {
 					_id: '$status',
 					count: { $sum: 1 },
-					totalAmount: { $sum: '$totalAmount' }
+					totalRevenue: { $sum: '$total' }
 				}
 			}
 		])
@@ -596,26 +937,26 @@ router.get('/analytics/orders-status', authenticateToken, async (req, res) => {
 // Get customer insights
 router.get('/analytics/customers', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
 
 		const [totalCustomers, repeatCustomers, topCustomers] = await Promise.all([
 			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisan._id } },
+				{ $match: { 'items.artisanId': artisan._id } },
 				{ $group: { _id: '$userId', count: { $sum: 1 } } },
 				{ $count: 'total' }
 			]),
 			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisan._id } },
+				{ $match: { 'items.artisanId': artisan._id } },
 				{ $group: { _id: '$userId', orderCount: { $sum: 1 } } },
 				{ $match: { orderCount: { $gt: 1 } } },
 				{ $count: 'total' }
 			]),
 			Order.aggregate([
-				{ $match: { 'items.productArtisan': artisan._id } },
-				{ $group: { _id: '$userId', totalSpent: { $sum: '$totalAmount' }, orders: { $sum: 1 } } },
+				{ $match: { 'items.artisanId': artisan._id } },
+				{ $group: { _id: '$userId', totalSpent: { $sum: '$total' }, orders: { $sum: 1 } } },
 				{ $sort: { totalSpent: -1 } },
 				{ $limit: 5 },
 				{
@@ -643,7 +984,7 @@ router.get('/analytics/customers', authenticateToken, async (req, res) => {
 // Get category performance
 router.get('/analytics/categories', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -671,7 +1012,7 @@ router.get('/analytics/categories', authenticateToken, async (req, res) => {
 // Get real-time notifications/alerts
 router.get('/alerts', authenticateToken, async (req, res) => {
 	try {
-		const artisan = await Artisan.findOne({ userId: req.user._id })
+		const artisan = await getArtisanForRequest(req)
 		if (!artisan) {
 			return res.status(404).json({ error: 'Artisan profile not found' })
 		}
@@ -684,7 +1025,7 @@ router.get('/alerts', authenticateToken, async (req, res) => {
 
 		// Pending orders
 		const pendingOrders = await Order.countDocuments({
-			'items.productArtisan': artisan._id,
+			'items.artisanId': artisan._id,
 			status: 'pending'
 		})
 

@@ -51,7 +51,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
         // Simplified - just use file extensions for better compatibility
         return '.pdf,.doc,.docx,.jpg,.jpeg,.png';
       case 'video':
-        return 'video/*';
+        return 'video/mp4,video/webm,video/ogg,video/quicktime,.mp4,.webm,.ogg,.mov';
       case 'any':
         return '*/*';
       default:
@@ -74,10 +74,10 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
       return;
     }
 
-    if (fileType === 'video' && !file.type.startsWith('video/')) {
+    if (fileType === 'video' && !['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(file.type)) {
       toast({
-        title: 'Invalid file type',
-        description: 'Please select a video file',
+        title: 'Unsupported video format',
+        description: 'Please select an MP4, WebM, MOV or OGG file',
         variant: 'destructive'
       });
       return;
@@ -103,7 +103,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     }
 
     // Increase size limit for documents and videos
-    const maxSize = fileType === 'video' ? 50 * 1024 * 1024 : 10 * 1024 * 1024; // 50MB for videos, 10MB for others
+    const maxSize = fileType === 'video' ? 15 * 1024 * 1024 : 10 * 1024 * 1024; // 15MB for videos, 10MB for others
     if (file.size > maxSize) {
       toast({
         title: 'File too large',
@@ -284,7 +284,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
           </div>
           <p className="text-xs text-gray-500">
             {fileType === 'video' 
-              ? 'MP4, WebM, AVI up to 50MB' 
+              ? 'MP4, WebM, MOV or OGG up to 15MB' 
               : fileType === 'document' 
               ? 'PDF, DOC, DOCX, JPG, PNG up to 10MB'
               : 'PNG, JPG, GIF up to 10MB'}

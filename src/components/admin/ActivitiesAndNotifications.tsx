@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,25 +8,34 @@ import { Activity, Bell, User, Package, CreditCard, AlertTriangle, CheckCircle, 
 import { adminService } from "@/services/adminService";
 import { useToast } from "@/hooks/use-toast";
 
+interface Activity {
+  id: number;
+  type: string;
+  action: string;
+  details: string;
+  timestamp: string;
+  user: string;
+  icon: string;
+  color: string;
+}
+
+interface Notification {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+}
+
 export function ActivitiesAndNotifications() {
   const [activeTab, setActiveTab] = useState("activities");
-  const [activities, setActivities] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadData();
-    
-    // Set up real-time polling every 45 seconds for activities
-    const interval = setInterval(() => {
-      loadData();
-    }, 45000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [activitiesResponse, notificationsResponse] = await Promise.all([
@@ -61,7 +70,18 @@ export function ActivitiesAndNotifications() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadData();
+    
+    // Set up real-time polling every 45 seconds for activities
+    const interval = setInterval(() => {
+      loadData();
+    }, 45000);
+    
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   const getIcon = (iconName) => {
     switch (iconName) {
@@ -95,14 +115,12 @@ export function ActivitiesAndNotifications() {
     }
   };
 
-  const handleMarkAsRead = (notificationId) => {
+  const handleMarkAsRead = (_notificationId: number) => {
     // API call to mark notification as read would go here
-    console.log(`Marking notification ${notificationId} as read`);
   };
 
   const handleClearAll = () => {
     // API call to clear all notifications would go here
-    console.log("Clearing all notifications");
   };
 
   if (loading) {

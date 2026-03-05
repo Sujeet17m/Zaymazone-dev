@@ -3,12 +3,13 @@ import mongoose from 'mongoose'
 const artisanSchema = new mongoose.Schema({
 	userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
 	name: { type: String, required: true, trim: true, maxLength: 120 },
-	email: { type: String, required: true, trim: true, lowercase: true, unique: true },
-	password: { type: String, required: true },
+	// email/password are optional for Firebase-authenticated artisans (Firebase handles all auth)
+	email: { type: String, required: false, trim: true, lowercase: true, unique: true, sparse: true },
+	password: { type: String, required: false },
 	bio: { type: String, default: '', maxLength: 1000 },
 	location: { 
-		city: { type: String, required: true, index: true },
-		state: { type: String, required: true },
+		city: { type: String, default: 'India', index: true },
+		state: { type: String, default: 'India' },
 		country: { type: String, default: 'India' }
 	},
 	avatar: { type: String, default: '' },
@@ -106,6 +107,20 @@ const artisanSchema = new mongoose.Schema({
 		changedAt: { type: Date },
 		changedFields: [{ type: String }], // Array of field names that were changed
 		changes: { type: mongoose.Schema.Types.Mixed } // Store the new values for reference
+	},
+	// Verified artisan badge – populated once all required documents are approved
+	verifiedBadge: {
+		badgeId:     { type: String, unique: true, sparse: true, index: true }, // SHA-256 derived, globally unique
+		tier:        { type: String, enum: ['standard', 'premium'], default: 'standard' },
+		displayText: { type: String, default: 'Zaymazone Verified Artisan' },
+		issuedAt:    { type: Date },
+		issuedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // admin who triggered final approval
+		metadata: {
+			documentsVerified:    [{ type: String }],   // list of approved documentTypes at badge time
+			verificationScore:    { type: Number, min: 0, max: 100, default: 0 }, // coverage score 0-100
+			requiredCount:        { type: Number, default: 0 },
+			approvedCount:        { type: Number, default: 0 },
+		},
 	},
 	joinedDate: { type: Date, default: Date.now }
 }, { timestamps: true })

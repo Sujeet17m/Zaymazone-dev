@@ -11,6 +11,7 @@ import Order from '../models/Order.js'
 import Category from '../models/Category.js'
 import BlogPost from '../models/BlogPost.js'
 import Comment from '../models/Comment.js'
+import Invoice from '../models/Invoice.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { uploadImageToGridFS } from '../services/imageService.js'
 
@@ -33,13 +34,13 @@ const upload = multer({
 // Helper function to generate tokens
 const generateTokens = (userId, email) => {
   const accessToken = jwt.sign(
-    { sub: userId, email }, 
-    process.env.JWT_SECRET || 'dev-secret', 
+    { sub: userId, email },
+    process.env.JWT_SECRET || 'dev-secret',
     { expiresIn: '8h' } // Longer session for admin
   )
-  
+
   const refreshToken = crypto.randomBytes(64).toString('hex')
-  
+
   return { accessToken, refreshToken }
 }
 
@@ -54,21 +55,21 @@ router.post('/auth/login', async (req, res) => {
   try {
     const parsed = adminLoginSchema.safeParse(req.body)
     if (!parsed.success) return res.status(400).json({ error: 'Invalid credentials' })
-    
+
     const { email, password } = parsed.data
-    
+
     // Find user with admin role
     const user = await User.findOne({ email, role: 'admin', isActive: true })
-    
+
     // If admin user doesn't exist, create default admin users
     if (!user) {
       const defaultAdmins = [
         { email: 'admin@zaymazone.com', password: 'admin123', name: 'Administrator' },
         { email: 'dinesh_admin@zaymazone.com', password: 'dinesh123', name: 'Dinesh Admin' }
       ]
-      
+
       const matchingAdmin = defaultAdmins.find(admin => admin.email === email && admin.password === password)
-      
+
       if (matchingAdmin) {
         // Create the admin user
         const passwordHash = await bcrypt.hash(matchingAdmin.password, 10)
@@ -80,13 +81,13 @@ router.post('/auth/login', async (req, res) => {
           isEmailVerified: true,
           authProvider: 'local'
         })
-        
+
         const { accessToken, refreshToken } = generateTokens(newAdmin._id, email)
-        
+
         // Store refresh token
         const refreshTokenExpiry = new Date()
         refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30)
-        
+
         newAdmin.refreshTokens.push({
           token: refreshToken,
           expiresAt: refreshTokenExpiry,
@@ -94,7 +95,7 @@ router.post('/auth/login', async (req, res) => {
         })
         newAdmin.lastLogin = new Date()
         await newAdmin.save()
-        
+
         return res.json({
           success: true,
           accessToken,
@@ -107,20 +108,20 @@ router.post('/auth/login', async (req, res) => {
           }
         })
       }
-      
+
       return res.status(401).json({ error: 'Invalid admin credentials' })
     }
-    
+
     // Verify password
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
-    
+
     const { accessToken, refreshToken } = generateTokens(user._id, email)
-    
+
     // Store refresh token
     const refreshTokenExpiry = new Date()
     refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30)
-    
+
     user.refreshTokens.push({
       token: refreshToken,
       expiresAt: refreshTokenExpiry,
@@ -128,7 +129,7 @@ router.post('/auth/login', async (req, res) => {
     })
     user.lastLogin = new Date()
     await user.save()
-    
+
     return res.json({
       success: true,
       accessToken,
@@ -310,7 +311,7 @@ router.post('/products', requireAuth, requireAdmin, async (req, res) => {
       materials,
       colors,
       tags,
-      stockCount: parseInt(stockCount) || 0,
+      stock: parseInt(stockCount) || 0,
       inStock: parseInt(stockCount) > 0,
       dimensions,
       weight,
@@ -357,7 +358,7 @@ router.get('/approvals/products', requireAuth, requireAdmin, async (req, res) =>
 
 router.get('/approvals/users', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const pendingUsers = await User.find({ 
+    const pendingUsers = await User.find({
       isActive: false,
       role: { $ne: 'admin' }
     }).sort({ createdAt: -1 })
@@ -373,7 +374,7 @@ router.post('/approvals/products/:id/approve', requireAuth, requireAdmin, async 
   try {
     const product = await Product.findByIdAndUpdate(
       req.params.id,
-      { 
+      {
         isActive: true,
         approvalStatus: 'approved'
       },
@@ -394,10 +395,10 @@ router.post('/approvals/products/:id/approve', requireAuth, requireAdmin, async 
 router.post('/approvals/products/:id/reject', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { reason } = req.body
-    
+
     const product = await Product.findByIdAndUpdate(
       req.params.id,
-      { 
+      {
         isActive: false
       },
       { new: true }
@@ -418,7 +419,7 @@ router.post('/approvals/artisans/:id/approve', requireAuth, requireAdmin, async 
   try {
     const artisan = await Artisan.findByIdAndUpdate(
       req.params.id,
-      { 
+      {
         'verification.isVerified': true,
         'verification.verifiedAt': new Date(),
         approvalStatus: 'approved',
@@ -441,10 +442,10 @@ router.post('/approvals/artisans/:id/approve', requireAuth, requireAdmin, async 
 router.post('/approvals/artisans/:id/reject', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { reason } = req.body
-    
+
     const artisan = await Artisan.findByIdAndUpdate(
       req.params.id,
-      { 
+      {
         'verification.isVerified': false
       },
       { new: true }
@@ -465,7 +466,7 @@ router.post('/approvals/artisans/:id/reject', requireAuth, requireAdmin, async (
 router.get('/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 10, search, status, role } = req.query
-    
+
     const filter = {}
     if (search) {
       filter.$or = [
@@ -502,7 +503,7 @@ router.get('/users', requireAuth, requireAdmin, async (req, res) => {
 router.put('/users/:id/status', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { status } = req.body
-    
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { status },
@@ -523,7 +524,7 @@ router.put('/users/:id/status', requireAuth, requireAdmin, async (req, res) => {
 router.put('/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { role } = req.body
-    
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { role },
@@ -637,33 +638,52 @@ router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
 router.get('/orders', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 10, status, search } = req.query
-    
-    const filter = {}
-    if (status) filter.status = status
-    if (search) {
-      filter.$or = [
-        { orderNumber: { $regex: search, $options: 'i' } },
-        { 'user.name': { $regex: search, $options: 'i' } }
+    const pageNum  = Math.max(1, parseInt(page))
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit)))
+
+    // Build the base filter
+    let orderFilter = {}
+    if (status) orderFilter.status = status
+
+    if (search && search.trim()) {
+      const term = search.trim()
+      // First find matching user IDs so we can search by customer name / email
+      const matchedUsers = await User.find({
+        $or: [
+          { name:  { $regex: term, $options: 'i' } },
+          { email: { $regex: term, $options: 'i' } },
+        ]
+      }).select('_id').lean()
+
+      const userIds = matchedUsers.map(u => u._id)
+
+      orderFilter.$or = [
+        { orderNumber: { $regex: term, $options: 'i' } },
+        ...(userIds.length ? [{ userId: { $in: userIds } }] : []),
+        // also match recipient name inside the shipping address
+        { 'shippingAddress.fullName': { $regex: term, $options: 'i' } },
       ]
     }
 
-    const orders = await Order.find(filter)
-      .populate('user', 'name email')
-      .populate('items.product', 'name images price')
-      .populate('items.artisan', 'name')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-
-    const total = await Order.countDocuments(filter)
+    const [orders, total] = await Promise.all([
+      Order.find(orderFilter)
+        .populate('userId', 'name email phone role')
+        .populate('items.productId', 'name images price')
+        .populate('items.artisanId', 'name')
+        .sort({ createdAt: -1 })
+        .limit(limitNum)
+        .skip((pageNum - 1) * limitNum)
+        .lean(),
+      Order.countDocuments(orderFilter),
+    ])
 
     res.json({
       orders,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limitNum)
       }
     })
   } catch (error) {
@@ -672,21 +692,59 @@ router.get('/orders', requireAuth, requireAdmin, async (req, res) => {
   }
 })
 
-router.put('/orders/:id/status', requireAuth, requireAdmin, async (req, res) => {
+// Get a single order by ID (admin — no userId restriction)
+router.get('/orders/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { status } = req.body
-    
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status, updatedAt: new Date() },
-      { new: true }
-    ).populate('user', 'name email')
+    const order = await Order.findById(req.params.id)
+      .populate('userId', 'name email')
+      .populate('items.productId', 'name images category')
+      .populate('items.artisanId', 'name location')
+      .lean()
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' })
     }
 
-    res.json({ message: 'Order status updated successfully', order })
+    res.json(order)
+  } catch (error) {
+    console.error('Get order by id error:', error)
+    res.status(500).json({ error: 'Failed to fetch order' })
+  }
+})
+
+router.put('/orders/:id/status', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { status, note, trackingNumber } = req.body
+
+    const validStatuses = ['placed', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'refunded']
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` })
+    }
+
+    // Use findById + save so the pre-save hook fires and statusHistory is auto-updated
+    const order = await Order.findById(req.params.id)
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' })
+    }
+
+    order.status = status
+    if (trackingNumber) order.trackingNumber = trackingNumber
+    // Override the auto-generated note if one was supplied
+    if (note) {
+      // Pre-save hook will push the entry; we patch its note right after save
+      await order.save()
+      const entry = order.statusHistory[order.statusHistory.length - 1]
+      if (entry && entry.status === status) entry.note = note
+      await order.save()
+    } else {
+      await order.save()
+    }
+
+    const populated = await Order.findById(order._id)
+      .populate('userId', 'name email')
+      .lean()
+
+    res.json({ message: 'Order status updated successfully', order: populated })
   } catch (error) {
     console.error('Update order status error:', error)
     res.status(500).json({ error: 'Failed to update order status' })
@@ -697,10 +755,10 @@ router.put('/orders/:id/status', requireAuth, requireAdmin, async (req, res) => 
 router.get('/analytics/sales', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { period = '30days' } = req.query
-    
+
     let dateFilter = {}
     const now = new Date()
-    
+
     switch (period) {
       case '7days':
         dateFilter = { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }
@@ -721,7 +779,7 @@ router.get('/analytics/sales', requireAuth, requireAdmin, async (req, res) => {
         { $match: { createdAt: dateFilter, status: 'completed' } },
         {
           $group: {
-            _id: { 
+            _id: {
               year: { $year: '$createdAt' },
               month: { $month: '$createdAt' },
               day: { $dayOfMonth: '$createdAt' }
@@ -1153,9 +1211,67 @@ router.get('/artisans/:id', requireAuth, requireAdmin, async (req, res) => {
 
 router.put('/artisans/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
+    // Extract alias / flat fields sent by ArtisanManagement form and map them
+    // to the correct MongoDB schema paths so nested sub-documents aren't clobbered.
+    const {
+      phone,
+      website,
+      socialMedia,
+      businessDetails,
+      name, bio, location, avatar, coverImage,
+      specialties, experience, email,
+      isActive, isVerified,
+      ...rest
+    } = req.body
+
+    const setFields = { updatedAt: new Date() }
+
+    // Top-level scalar fields
+    if (name        !== undefined) setFields.name        = name
+    if (bio         !== undefined) setFields.bio         = bio
+    if (avatar      !== undefined) setFields.avatar      = avatar
+    if (coverImage  !== undefined) setFields.coverImage  = coverImage
+    if (experience  !== undefined) setFields.experience  = Number(experience) || 0
+    if (email       !== undefined) setFields.email       = email
+    if (isActive    !== undefined) setFields.isActive    = isActive
+
+    if (Array.isArray(specialties)) setFields.specialties = specialties
+
+    // Location (safe to replace whole sub-doc since it has only city/state/country)
+    if (location) setFields.location = location
+
+    // Verification flag
+    if (isVerified !== undefined) setFields['verification.isVerified'] = isVerified
+
+    // Phone — stored inside businessInfo sub-doc
+    if (phone !== undefined) setFields['businessInfo.contact.phone'] = phone
+
+    // Website — stored inside socials sub-doc
+    if (website !== undefined) setFields['socials.website'] = website
+
+    // Social links — ArtisanManagement sends as socialMedia { instagram, facebook, twitter }
+    if (socialMedia) {
+      if (socialMedia.instagram !== undefined) setFields['socials.instagram'] = socialMedia.instagram
+      if (socialMedia.facebook  !== undefined) setFields['socials.facebook']  = socialMedia.facebook
+    }
+
+    // Business details — ArtisanManagement sends as businessDetails { businessName, gstNumber, businessType }
+    if (businessDetails) {
+      if (businessDetails.businessName !== undefined) setFields['businessInfo.businessName'] = businessDetails.businessName
+      if (businessDetails.gstNumber    !== undefined) setFields['businessInfo.gstNumber']    = businessDetails.gstNumber
+      // businessType maps to sellerType enum in schema
+      if (businessDetails.businessType !== undefined) setFields['businessInfo.sellerType']   = businessDetails.businessType
+    }
+
+    // Forward any other top-level fields the admin might send (e.g. approvalNotes)
+    Object.assign(setFields, rest)
+
+    // Admin editing the artisan effectively acknowledges any pending changes
+    setFields['pendingChanges.hasChanges'] = false
+
     const artisan = await Artisan.findByIdAndUpdate(
       req.params.id,
-      { ...req.body, updatedAt: new Date() },
+      { $set: setFields },
       { new: true }
     )
 
@@ -1170,6 +1286,32 @@ router.put('/artisans/:id', requireAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Admin artisan update error:', error)
     res.status(500).json({ error: 'Failed to update artisan' })
+  }
+})
+
+// PATCH /api/admin/artisans/:id/acknowledge-changes
+// Admin can mark pendingChanges as reviewed without modifying any other data.
+router.patch('/artisans/:id/acknowledge-changes', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const artisan = await Artisan.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          'pendingChanges.hasChanges': false,
+          updatedAt: new Date()
+        }
+      },
+      { new: true }
+    )
+
+    if (!artisan) {
+      return res.status(404).json({ error: 'Artisan not found' })
+    }
+
+    res.json({ message: 'Changes acknowledged successfully', artisan })
+  } catch (error) {
+    console.error('Admin acknowledge changes error:', error)
+    res.status(500).json({ error: 'Failed to acknowledge changes' })
   }
 })
 
@@ -1193,7 +1335,7 @@ router.delete('/artisans/:id', requireAuth, requireAdmin, async (req, res) => {
 // Update artisan document verification status
 router.patch('/artisans/:id/verification', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { documentVerification } = req.body
+    const { documentVerification, isVerified } = req.body
 
     if (!documentVerification) {
       return res.status(400).json({ error: 'Document verification data is required' })
@@ -1215,6 +1357,10 @@ router.patch('/artisans/:id/verification', requireAuth, requireAdmin, async (req
       bankDetails: documentVerification.bankDetails || false
     }
 
+    // Update overall verification status (controls ✓/✗ badge next to artisan name)
+    if (!artisan.verification) artisan.verification = {}
+    artisan.verification.isVerified = isVerified === true
+
     await artisan.save()
 
     res.json({
@@ -1222,7 +1368,8 @@ router.patch('/artisans/:id/verification', requireAuth, requireAdmin, async (req
       artisan: {
         _id: artisan._id,
         name: artisan.name,
-        documentVerification: artisan.documentVerification
+        documentVerification: artisan.documentVerification,
+        verification: { isVerified: artisan.verification.isVerified }
       }
     })
   } catch (error) {
@@ -1326,7 +1473,7 @@ router.put('/page-content/:id', requireAuth, requireAdmin, async (req, res) => {
 router.get('/categories', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 50, search, featured, status = 'active' } = req.query
-    
+
     const query = {}
     if (status === 'active') query.isActive = true
     if (featured !== undefined) query.featured = featured === 'true'
@@ -1366,7 +1513,7 @@ router.get('/categories', requireAuth, requireAdmin, async (req, res) => {
       updatedAt: cat.updatedAt
     }))
 
-    res.json({ 
+    res.json({
       categories: transformedCategories,
       pagination: {
         page: parseInt(page),
@@ -1383,13 +1530,13 @@ router.get('/categories', requireAuth, requireAdmin, async (req, res) => {
 
 router.post('/categories', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { 
-      name, 
-      description, 
-      image, 
-      icon, 
-      subcategories, 
-      featured, 
+    const {
+      name,
+      description,
+      image,
+      icon,
+      subcategories,
+      featured,
       displayOrder,
       seoTitle,
       seoDescription
@@ -1417,11 +1564,11 @@ router.post('/categories', requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Check if category with same name already exists
-    const existingCategory = await Category.findOne({ 
+    const existingCategory = await Category.findOne({
       name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
-      isActive: true 
+      isActive: true
     })
-    
+
     if (existingCategory) {
       return res.status(400).json({ error: 'Category with this name already exists' })
     }
@@ -1481,13 +1628,13 @@ router.post('/categories', requireAuth, requireAdmin, async (req, res) => {
 router.put('/categories/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params
-    const { 
-      name, 
-      description, 
-      image, 
-      icon, 
-      subcategories, 
-      featured, 
+    const {
+      name,
+      description,
+      image,
+      icon,
+      subcategories,
+      featured,
       displayOrder,
       seoTitle,
       seoDescription
@@ -1525,12 +1672,12 @@ router.put('/categories/:id', requireAuth, requireAdmin, async (req, res) => {
 
     // Check if another category with same name exists (if name is being changed)
     if (name && name.trim() !== category.name) {
-      const existingCategory = await Category.findOne({ 
+      const existingCategory = await Category.findOne({
         name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
         isActive: true,
         _id: { $ne: category._id }
       })
-      
+
       if (existingCategory) {
         return res.status(400).json({ error: 'Category with this name already exists' })
       }
@@ -1605,14 +1752,14 @@ router.delete('/categories/:id', requireAuth, requireAdmin, async (req, res) => 
     }
 
     // Check if there are products using this category
-    const productsUsingCategory = await Product.countDocuments({ 
+    const productsUsingCategory = await Product.countDocuments({
       category: { $in: [category.slug, category.name.toLowerCase()] },
-      isActive: true 
+      isActive: true
     })
 
     if (productsUsingCategory > 0) {
-      return res.status(400).json({ 
-        error: `Cannot delete category. ${productsUsingCategory} products are using this category.` 
+      return res.status(400).json({
+        error: `Cannot delete category. ${productsUsingCategory} products are using this category.`
       })
     }
 
@@ -1636,7 +1783,7 @@ router.delete('/categories/:id', requireAuth, requireAdmin, async (req, res) => 
 router.get('/blog-posts', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20, search, category, status, featured, author } = req.query
-    
+
     const query = { isActive: true }
     if (search) {
       query.$or = [
@@ -1657,7 +1804,7 @@ router.get('/blog-posts', requireAuth, requireAdmin, async (req, res) => {
 
     const total = await BlogPost.countDocuments(query)
 
-    res.json({ 
+    res.json({
       posts: blogPosts,
       pagination: {
         page: parseInt(page),
@@ -1678,15 +1825,15 @@ router.post('/blog-posts', requireAuth, requireAdmin, async (req, res) => {
     let featuredImageUrl = req.body.featuredImage || ''
     let imageUrls = req.body.images ? (Array.isArray(req.body.images) ? req.body.images : [req.body.images]) : []
 
-    const { 
-      title, 
-      excerpt, 
-      content, 
-      author, 
-      category, 
-      tags, 
+    const {
+      title,
+      excerpt,
+      content,
+      author,
+      category,
+      tags,
       status,
-      featured, 
+      featured,
       readTime,
       seoTitle,
       seoDescription
@@ -1713,11 +1860,11 @@ router.post('/blog-posts', requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Check if post with same title already exists
-    const existingPost = await BlogPost.findOne({ 
+    const existingPost = await BlogPost.findOne({
       title: { $regex: new RegExp(`^${title.trim()}$`, 'i') },
-      isActive: true 
+      isActive: true
     })
-    
+
     if (existingPost) {
       return res.status(400).json({ error: 'Blog post with this title already exists' })
     }
@@ -1793,17 +1940,17 @@ router.get('/blog-posts/:id', requireAuth, requireAdmin, async (req, res) => {
 router.put('/blog-posts/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params
-    const { 
-      title, 
-      excerpt, 
-      content, 
-      featuredImage, 
+    const {
+      title,
+      excerpt,
+      content,
+      featuredImage,
       images,
-      author, 
-      category, 
-      tags, 
+      author,
+      category,
+      tags,
       status,
-      featured, 
+      featured,
       readTime,
       seoTitle,
       seoDescription
@@ -1824,12 +1971,12 @@ router.put('/blog-posts/:id', requireAuth, requireAdmin, async (req, res) => {
 
     // Check if another post with same title exists (if title is being changed)
     if (title && title.trim() !== post.title) {
-      const existingPost = await BlogPost.findOne({ 
+      const existingPost = await BlogPost.findOne({
         title: { $regex: new RegExp(`^${title.trim()}$`, 'i') },
         isActive: true,
         _id: { $ne: post._id }
       })
-      
+
       if (existingPost) {
         return res.status(400).json({ error: 'Blog post with this title already exists' })
       }
@@ -1981,15 +2128,15 @@ router.get('/comments', requireAuth, requireAdmin, async (req, res) => {
 
     // Build query
     const query = {}
-    
+
     if (status && status !== 'all') {
       query.status = status
     }
-    
+
     if (postId) {
       query.postId = postId
     }
-    
+
     if (search) {
       query.$or = [
         { content: { $regex: search, $options: 'i' } },
@@ -2007,19 +2154,19 @@ router.get('/comments', requireAuth, requireAdmin, async (req, res) => {
       .skip(parseInt(skip))
 
     const totalCount = await Comment.countDocuments(query)
-    
+
     // Get status counts
     const statusCounts = await Comment.aggregate([
       { $group: { _id: '$status', count: { $sum: 1 } } }
     ])
-    
+
     const counts = {
       pending: 0,
       approved: 0,
       rejected: 0,
       spam: 0
     }
-    
+
     statusCounts.forEach(item => {
       counts[item._id] = item.count
     })
@@ -2062,9 +2209,9 @@ router.patch('/comments/:id/moderate', requireAuth, requireAdmin, async (req, re
   try {
     const parsed = commentModerationSchema.safeParse(req.body)
     if (!parsed.success) {
-      return res.status(400).json({ 
-        error: 'Invalid data', 
-        details: parsed.error.errors 
+      return res.status(400).json({
+        error: 'Invalid data',
+        details: parsed.error.errors
       })
     }
 
@@ -2100,7 +2247,7 @@ router.patch('/comments/:id/moderate', requireAuth, requireAdmin, async (req, re
       .populate('postId', 'title slug')
       .populate('moderatedBy', 'name email')
 
-    res.json({ 
+    res.json({
       message: `Comment ${status} successfully`,
       comment: updatedComment
     })
@@ -2137,11 +2284,11 @@ router.patch('/comments/bulk-moderate', requireAuth, requireAdmin, async (req, r
     // Update blog post comment counts
     const comments = await Comment.find({ _id: { $in: commentIds } })
     const postUpdates = {}
-    
+
     comments.forEach(comment => {
       const postId = comment.postId.toString()
       if (!postUpdates[postId]) postUpdates[postId] = 0
-      
+
       if (status === 'approved' && comment.status !== 'approved') {
         postUpdates[postId]++
       } else if (status !== 'approved' && comment.status === 'approved') {
@@ -2156,7 +2303,7 @@ router.patch('/comments/bulk-moderate', requireAuth, requireAdmin, async (req, r
       }
     }
 
-    res.json({ 
+    res.json({
       message: `${result.modifiedCount} comments ${status} successfully`,
       modifiedCount: result.modifiedCount
     })
@@ -2210,7 +2357,7 @@ router.get('/comments/stats', requireAuth, requireAdmin, async (req, res) => {
           }
         }
       ]),
-      
+
       // Recent statistics (last 30 days)
       Comment.aggregate([
         {
@@ -2229,7 +2376,7 @@ router.get('/comments/stats', requireAuth, requireAdmin, async (req, res) => {
         },
         { $sort: { '_id.date': -1 } }
       ]),
-      
+
       // Most commented posts
       Comment.aggregate([
         { $match: { status: 'approved' } },
@@ -2394,7 +2541,7 @@ router.post('/sellers/:id/approve', requireAuth, requireAdmin, async (req, res) 
     artisan.approvalNotes = approvalNotes || ''
     artisan.isActive = true
     artisan.rejectionReason = undefined
-    
+
     // Save document verification status
     if (documentVerification) {
       artisan.documentVerification = {
@@ -2516,10 +2663,10 @@ router.get('/sellers/stats', requireAuth, requireAdmin, async (req, res) => {
 router.get('/reports/sales', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { period = '30days' } = req.query
-    
+
     let dateFilter = {}
     const now = new Date()
-    
+
     switch (period) {
       case '7days':
         dateFilter = { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }
@@ -2608,48 +2755,39 @@ router.get('/reports/sales', requireAuth, requireAdmin, async (req, res) => {
 
 // ============= INVOICES ENDPOINTS =============
 
-// Get invoices
+// Get invoices — backed by real Invoice model (Module 3)
 router.get('/invoices', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, search } = req.query
-    const skip = (page - 1) * limit
+    const { page = 1, limit = 10, status, type, search, from, to } = req.query
+    const skip = (parseInt(page) - 1) * parseInt(limit)
 
     const filter = {}
-    if (status) filter.status = status
+    if (status)  filter.status = status
+    if (type)    filter.type   = type
+    if (from || to) {
+      filter.issuedAt = {}
+      if (from) filter.issuedAt.$gte = new Date(from)
+      if (to)   filter.issuedAt.$lte = new Date(to)
+    }
     if (search) {
-      filter.$or = [
-        { orderNumber: { $regex: search, $options: 'i' } },
-        { 'user.name': { $regex: search, $options: 'i' } }
-      ]
+      const rx = { $regex: search, $options: 'i' }
+      filter.$or = [{ invoiceNumber: rx }, { orderNumber: rx }]
     }
 
-    const orders = await Order.find(filter)
-      .populate('user', 'name email')
-      .sort({ createdAt: -1 })
+    const total    = await Invoice.countDocuments(filter)
+    const invoices = await Invoice.find(filter)
+      .sort({ issuedAt: -1 })
       .skip(skip)
-      .limit(limit)
+      .limit(parseInt(limit))
       .lean()
-
-    const invoices = orders.map((order, idx) => ({
-      id: `INV-${new Date().getFullYear()}-${String(idx + 1).padStart(5, '0')}`,
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      customer: order.user?.name || 'Customer',
-      amount: order.totalAmount,
-      status: order.status || 'pending',
-      date: order.createdAt,
-      dueDate: new Date(order.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000)
-    }))
-
-    const total = await Order.countDocuments(filter)
 
     res.json({
       invoices,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page:       parseInt(page),
+        limit:      parseInt(limit),
         total,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / parseInt(limit))
       }
     })
   } catch (error) {

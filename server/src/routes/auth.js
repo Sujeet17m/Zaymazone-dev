@@ -14,7 +14,7 @@ const generateTokens = (userId, email) => {
 	const accessToken = jwt.sign(
 		{ sub: userId, email }, 
 		process.env.JWT_SECRET || 'dev-secret', 
-		{ expiresIn: '15m' } // Short-lived access token
+		{ expiresIn: '7d' }
 	)
 	
 	const refreshToken = crypto.randomBytes(64).toString('hex')
@@ -29,12 +29,15 @@ const cleanExpiredTokens = async (userId) => {
 	})
 }
 
+// Signup only requires identity fields — address is intentionally excluded.
+// Address is independent of authentication and is validated at checkout only.
 const signUpSchema = z.object({
 	name: z.string().min(1).max(120),
 	email: z.string().email().max(254),
 	password: z.string().min(8).max(128),
 })
 
+// Signin also only needs identity fields — no address dependency.
 const signInSchema = z.object({
 	email: z.string().email().max(254),
 	password: z.string().min(6).max(128),
@@ -258,6 +261,30 @@ router.get('/me', requireAuth, async (req, res) => {
 		return res.json({ user })
 	} catch (error) {
 		console.error('Get user error:', error)
+		return res.status(500).json({ error: 'Internal server error' })
+	}
+})
+
+// ─── Public: check if an email is already registered ─────────────────────────
+// Returns { existsAsCustomer: bool, existsAsArtisan: bool }
+// No auth required – only exposes boolean flags, no PII.
+router.get('/check-email', async (req, res) => {
+	try {
+		const { email } = req.query
+		if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+			return res.status(400).json({ error: 'Valid email is required' })
+		}
+		const normalised = email.toLowerCase().trim()
+		const [customerDoc, artisanDoc] = await Promise.all([
+			User.findOne({ email: normalised }).lean(),
+			Artisan.findOne({ email: normalised }).lean(),
+		])
+		return res.json({
+			existsAsCustomer: !!customerDoc,
+			existsAsArtisan:  !!artisanDoc,
+		})
+	} catch (error) {
+		console.error('check-email error:', error)
 		return res.status(500).json({ error: 'Internal server error' })
 	}
 })

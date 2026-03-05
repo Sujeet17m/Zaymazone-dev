@@ -268,6 +268,7 @@ export function ArtisanManagement() {
           <select
             value={statusFilter}
             onChange={(e) => handleStatusFilter(e.target.value)}
+            aria-label="Filter artisans by status"
             className="px-3 py-2 border border-gray-300 rounded-md"
           >
             <option value="all">All Status</option>

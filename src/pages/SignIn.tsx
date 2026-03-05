@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,14 +7,33 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { sellerApi } from '@/services/api';
+import { auth } from '@/lib/firebase';
+
+/** Returns the default dashboard path for a given role. */
+const roleHome = (role?: string) => {
+  if (role === 'admin') return '/admin';
+  if (role === 'artisan') return '/artisan-dashboard';
+  return '/dashboard';
+};
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn, signInWithGoogle, signOut, user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // If the user is already authenticated, send them to their dashboard immediately
+  // so they never see the sign-in form while logged in (avoids redirect loops).
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && user) {
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      navigate(from || roleHome(user.role), { replace: true });
+    }
+  }, [authLoading, isAuthenticated, user, location.state, navigate]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,8 +44,22 @@ const SignIn = () => {
 
     try {
       setIsLoading(true);
+
+      // Cross-account guard: reject if email belongs to an artisan account
+      try {
+        const check = await sellerApi.checkEmail(email);
+        if (check.existsAsArtisan) {
+          toast.error('This email is registered as an artisan account. Please sign in at the artisan sign-in page.');
+          return;
+        }
+      } catch {
+        // Network failure — allow sign-in attempt to proceed
+      }
+
       await signIn(email, password, 'user');
-      navigate('/dashboard');
+      // After signIn the AuthContext sets user; redirect to deep-link or role home
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      navigate(from || '/dashboard', { replace: true });
     } catch (error) {
       console.error('Sign in error:', error);
     } finally {
@@ -38,7 +71,24 @@ const SignIn = () => {
     try {
       setIsLoading(true);
       await signInWithGoogle('user');
-      navigate('/dashboard');
+
+      // Cross-account guard: reject if the Google email belongs to an artisan account
+      const googleEmail = auth.currentUser?.email;
+      if (googleEmail) {
+        try {
+          const check = await sellerApi.checkEmail(googleEmail);
+          if (check.existsAsArtisan) {
+            await signOut();
+            toast.error('This Google account is registered as an artisan. Please sign in at the artisan sign-in page.');
+            return;
+          }
+        } catch {
+          // Network failure — allow navigation to proceed
+        }
+      }
+
+      const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
+      navigate(from || '/dashboard', { replace: true });
     } catch (error: any) {
       console.error('Google sign in error:', error);
       if (error.code === 'auth/unauthorized-domain') {
@@ -84,7 +134,9 @@ const SignIn = () => {
                 <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
                 <Input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
@@ -100,7 +152,9 @@ const SignIn = () => {
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"

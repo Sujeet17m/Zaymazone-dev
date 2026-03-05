@@ -32,26 +32,67 @@ const initializeFirebaseAdmin = () => {
   }
 };
 
+/**
+ * Development fallback: decode a Firebase ID token (JWT) without full signature
+ * verification. Used only when FIREBASE_SERVICE_ACCOUNT_KEY is absent so that
+ * local development still works. DO NOT use in production.
+ */
+function decodeFirebaseTokenDev(idToken) {
+  try {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) throw new Error('Not a valid JWT');
+    // Base64url-decode the payload section
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+    );
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'tic-tac-toe-ff1c7';
+
+    // Detect if this is actually a Firebase token by checking the issuer
+    const expectedIss = `https://securetoken.google.com/${projectId}`;
+    if (!payload.iss || !payload.iss.startsWith('https://securetoken.google.com/')) {
+      throw new Error('Not a Firebase token (issuer mismatch)');
+    }
+
+    // Basic sanity checks
+    if (payload.aud && payload.aud !== projectId) throw new Error(`Token audience mismatch: ${payload.aud}`);
+    if (payload.exp < Math.floor(Date.now() / 1000)) throw new Error('Token expired');
+    return {
+      uid: payload.user_id || payload.sub,
+      email: payload.email || '',
+      emailVerified: payload.email_verified || false,
+      name: payload.name || null,
+      picture: payload.picture || null,
+      provider: (payload.firebase && payload.firebase.sign_in_provider) || 'password'
+    };
+  } catch (err) {
+    throw new Error(`Dev token decode failed: ${err.message}`);
+  }
+}
+
 // Verify Firebase ID token
 export const verifyFirebaseToken = async (idToken) => {
-  try {
-    const firebaseAdmin = initializeFirebaseAdmin();
-    if (!firebaseAdmin) {
-      throw new Error('Firebase Admin not initialized');
+  // Try full admin verification first
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    try {
+      const firebaseAdmin = initializeFirebaseAdmin();
+      if (!firebaseAdmin) throw new Error('Firebase Admin not initialized');
+      const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
+      return {
+        uid: decodedToken.uid,
+        email: decodedToken.email,
+        emailVerified: decodedToken.email_verified,
+        name: decodedToken.name,
+        picture: decodedToken.picture,
+        provider: decodedToken.firebase.sign_in_provider
+      };
+    } catch (error) {
+      throw new Error(`Firebase token verification failed: ${error.message}`);
     }
-    
-    const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
-    return {
-      uid: decodedToken.uid,
-      email: decodedToken.email,
-      emailVerified: decodedToken.email_verified,
-      name: decodedToken.name,
-      picture: decodedToken.picture,
-      provider: decodedToken.firebase.sign_in_provider
-    };
-  } catch (error) {
-    throw new Error(`Firebase token verification failed: ${error.message}`);
   }
+
+  // Development fallback: decode without signature verification
+  console.warn('[firebase-admin] No FIREBASE_SERVICE_ACCOUNT_KEY — using dev token decode (no sig check)');
+  return decodeFirebaseTokenDev(idToken);
 };
 
 export const firebaseAdmin = initializeFirebaseAdmin();

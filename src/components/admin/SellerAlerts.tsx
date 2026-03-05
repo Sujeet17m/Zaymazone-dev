@@ -235,7 +235,7 @@ export function SellerAlerts() {
               <CardContent className="space-y-4">
                 <div>
                   <Label htmlFor="artisan-select">Select Artisan</Label>
-                  <select id="artisan-select" className="w-full p-2 border rounded-md">
+                  <select id="artisan-select" aria-label="Select artisan" className="w-full p-2 border rounded-md">
                     <option value="">Choose an artisan...</option>
                     <option value="rajesh">Rajesh Kumar</option>
                     <option value="priya">Priya Sharma</option>
@@ -253,8 +253,8 @@ export function SellerAlerts() {
                   />
                 </div>
                 <div>
-                  <Label>Alert Type</Label>
-                  <select className="w-full p-2 border rounded-md">
+                  <Label htmlFor="alert-type">Alert Type</Label>
+                  <select id="alert-type" aria-label="Alert type" className="w-full p-2 border rounded-md">
                     <option value="info">Information</option>
                     <option value="warning">Warning</option>
                     <option value="urgent">Urgent</option>

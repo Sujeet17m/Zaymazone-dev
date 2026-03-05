@@ -1,7 +1,22 @@
-// Global error handler middleware
+// ── Module 7: production-safe error handler ──────────────────────────────────
+// Only expose error details in development; log sanitised info in production.
+const isProd = process.env.NODE_ENV === 'production'
+
 export const errorHandler = (err, req, res, next) => {
-	console.error('Error:', err)
-	
+	// Structured log — stack trace only in development
+	if (isProd) {
+		console.error('[errorHandler]', {
+			name: err.name,
+			message: err.message,
+			code: err.code,
+			path: req.path,
+			method: req.method,
+			timestamp: new Date().toISOString(),
+		})
+	} else {
+		console.error('Error:', err)
+	}
+
 	// Mongoose validation error
 	if (err.name === 'ValidationError') {
 		const errors = Object.values(err.errors).map(error => ({
@@ -32,13 +47,15 @@ export const errorHandler = (err, req, res, next) => {
 	// JWT errors
 	if (err.name === 'JsonWebTokenError') {
 		return res.status(401).json({
-			error: 'Invalid token'
+			error: 'Invalid token',
+			code: 'INVALID_TOKEN'
 		})
 	}
 	
 	if (err.name === 'TokenExpiredError') {
 		return res.status(401).json({
-			error: 'Token expired'
+			error: 'Token expired',
+			code: 'TOKEN_EXPIRED'
 		})
 	}
 	
@@ -49,12 +66,26 @@ export const errorHandler = (err, req, res, next) => {
 	})
 }
 
-// 404 handler for undefined routes
+// 404 handler — only applied to /api/* paths.
+// Frontend SPA routes are handled by the client-side router; they must never
+// receive a 404 from the API server.  Non-API paths that reach this middleware
+// (e.g. direct asset requests in production) receive a user-friendly message.
 export const notFoundHandler = (req, res) => {
-	res.status(404).json({
-		error: 'Route not found',
-		path: req.path,
-		method: req.method
+	if (req.path.startsWith('/api/')) {
+		return res.status(404).json({
+			error: 'API endpoint not found',
+			code: 'ROUTE_NOT_FOUND',
+			path: req.path,
+			method: req.method,
+			availableAt: 'GET / for a list of all endpoints'
+		})
+	}
+	// For non-API paths return a minimal 404 — in production the reverse-proxy
+	// should serve index.html for all SPA routes before requests hit Express.
+	return res.status(404).json({
+		error: 'Not found',
+		code: 'NOT_FOUND',
+		path: req.path
 	})
 }
 

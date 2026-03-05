@@ -1,405 +1,585 @@
-/**
- * Email notification service for order updates
- * This is a basic template - integrate with your preferred email service
- * (SendGrid, AWS SES, Nodemailer, etc.)
+﻿/**
+ * emailService.js  (Module 1 â€” Mail System Stabilisation)
+ *
+ * Architecture
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * Every email request is first PERSISTED to the EmailQueue collection
+ * (status = "queued") and only then attempted.  This gives us:
+ *
+ *  1. No duplicate emails
+ *     An idempotency key (SHA-256 of type + entityId) sits behind a
+ *     unique index.  A second call for the same event silently returns
+ *     the existing job instead of creating a duplicate.
+ *
+ *  2. No race conditions
+ *     All in-flight work is committed to Mongo before delivery starts,
+ *     so concurrent requests see a consistent state.
+ *
+ *  3. Status tracking
+ *     Each job transitions: queued â†’ sending â†’ sent | failed | retrying
+ *
+ *  4. Automatic retries
+ *     Up to 3 attempts with exponential back-off (1 min, 5 min, 15 min).
+ *
+ *  5. Reusable templates
+ *     All HTML is produced by emailTemplates.js â€” one source of truth.
+ *
+ * Transport
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * Configure via environment variables:
+ *   EMAIL_ENABLED       true | false   (default false â€” logs only)
+ *   SMTP_HOST           e.g. smtp.gmail.com
+ *   SMTP_PORT           e.g. 587
+ *   SMTP_SECURE         true | false
+ *   SMTP_USER           sender address
+ *   SMTP_PASS           app password / API key
+ *   FROM_EMAIL          "Zaymazone <noreply@zaymazone.com>"
+ *
+ * Public API
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ *   enqueue(type, to, payload, entityType?, entityId?, dedupExtra?)
+ *   --- Buyer-facing ---
+ *   sendOrderConfirmation(order, user)
+ *   sendOrderStatusUpdate(order, user, newStatus, trackingInfo?)
+ *   sendOrderRejectionNotification(order, user, reason)
+ *   sendPaymentConfirmation(order, user, paymentDetails)
+ *   sendRefundNotification(order, user, refundDetails)
+ *   --- Artisan-facing order alerts (Module 5) ---
+ *   sendNewOrderToArtisan(order, artisan)
+ *   sendOrderCancelledToArtisan(order, artisan, reason, cancelledBy?, feeBreakdown?)
+ *   sendReturnRequestToArtisan(order, artisan, returnReason, returnDetails?)
+ *   --- Admin alerts (Module 5) ---
+ *   sendAdminOrderAlert(alertType, order, details?)
+ *   --- Artisan lifecycle ---
+ *   sendArtisanOnboardingSubmitted(artisan)
+ *   sendArtisanApproved(artisan)
+ *   sendArtisanRejected(artisan, reason)
+ *   sendVerificationSuccess(artisan, badge)
+ *   --- User lifecycle ---
+ *   sendWelcomeUser(user)
+ *   sendVerificationEmail(user, verificationUrl)
+ *   --- Queue management ---
+ *   retryJob(jobId)
+ *   getQueueStats()
  */
 
+import crypto     from 'crypto'
+import nodemailer from 'nodemailer'
+import EmailQueue  from '../models/EmailQueue.js'
+import { renderTemplate } from './emailTemplates.js'
+
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const QUEUE_POLL_MS   = parseInt(process.env.EMAIL_QUEUE_POLL_MS || '10000', 10)
+const MAX_ATTEMPTS    = parseInt(process.env.EMAIL_MAX_ATTEMPTS  || '3',     10)
+const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000]
+
+// â”€â”€â”€ Nodemailer transport factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function buildTransport() {
+  if (process.env.EMAIL_ENABLED !== 'true') return null
+  return nodemailer.createTransport({
+    host:   process.env.SMTP_HOST || 'smtp.gmail.com',
+    port:   parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    pool: true,
+    maxConnections: 3,
+    rateDelta: 1000,
+    rateLimit: 10,
+  })
+}
+
+// â”€â”€â”€ Idempotency key â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function makeIdempotencyKey(type, entityId, extra = '') {
+  const raw = `${type}:${String(entityId)}:${extra}`
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 40)
+}
+
+// â”€â”€â”€ EmailService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class EmailService {
   constructor() {
-    this.isEnabled = process.env.EMAIL_ENABLED === 'true';
-    this.fromEmail = process.env.FROM_EMAIL || 'noreply@zaymazone.com';
-    this.companyName = 'Zaymazone';
+    this.isEnabled   = process.env.EMAIL_ENABLED === 'true'
+    this.fromEmail   = process.env.FROM_EMAIL   || 'Zaymazone <noreply@zaymazone.com>'
+    this.companyName = 'Zaymazone'
+    this.transport   = buildTransport()
+    this._workerTimer = null
   }
 
-  /**
-   * Send order confirmation email
-   * @param {Object} order - Order details
-   * @param {Object} user - User details
-   */
-  async sendOrderConfirmation(order, user) {
-    if (!this.isEnabled) {
-      console.log('Email service disabled - Order confirmation:', {
-        to: user.email,
-        orderNumber: order.orderNumber,
-        total: order.total
-      });
-      return;
-    }
 
-    const subject = `Order Confirmation - ${order.orderNumber}`;
-    const template = this.getOrderConfirmationTemplate(order, user);
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      html: template,
-      data: {
-        orderNumber: order.orderNumber,
-        total: order.total,
-        items: order.items
-      }
-    });
-  }
+  // â”€â”€â”€ Core: enqueue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
-   * Send order status update email
-   * @param {Object} order - Order details
-   * @param {Object} user - User details
-   * @param {string} newStatus - New order status
-   * @param {Object} trackingInfo - Tracking information
+   * Persist an email job and attempt delivery.
+   * Duplicate calls (same idempotency key) return the existing job silently.
    */
-  async sendOrderStatusUpdate(order, user, newStatus, trackingInfo = {}) {
-    if (!this.isEnabled) {
-      console.log('Email service disabled - Status update:', {
-        to: user.email,
-        orderNumber: order.orderNumber,
-        status: newStatus,
-        trackingNumber: trackingInfo.trackingNumber
-      });
-      return;
-    }
+  async enqueue(type, to, payload, entityType = null, entityId = null, dedupExtra = '') {
+    const idempotencyKey = makeIdempotencyKey(type, entityId ?? to, dedupExtra)
 
-    const subject = `Order ${newStatus} - ${order.orderNumber}`;
-    const template = this.getOrderStatusTemplate(order, user, newStatus, trackingInfo);
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      html: template,
-      data: {
-        orderNumber: order.orderNumber,
-        status: newStatus,
-        trackingNumber: trackingInfo.trackingNumber,
-        courierService: trackingInfo.courierService
-      }
-    });
-  }
-
-  /**
-   * Send payment confirmation email
-   * @param {Object} order - Order details
-   * @param {Object} user - User details
-   * @param {Object} paymentDetails - Payment details
-   */
-  async sendPaymentConfirmation(order, user, paymentDetails) {
-    if (!this.isEnabled) {
-      console.log('Email service disabled - Payment confirmation:', {
-        to: user.email,
-        orderNumber: order.orderNumber,
-        paymentId: paymentDetails.paymentId
-      });
-      return;
-    }
-
-    const subject = `Payment Received - ${order.orderNumber}`;
-    const template = this.getPaymentConfirmationTemplate(order, user, paymentDetails);
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      html: template,
-      data: {
-        orderNumber: order.orderNumber,
-        paymentId: paymentDetails.paymentId,
-        amount: order.total
-      }
-    });
-  }
-
-  /**
-   * Send refund notification email
-   * @param {Object} order - Order details
-   * @param {Object} user - User details
-   * @param {Object} refundDetails - Refund details
-   */
-  async sendRefundNotification(order, user, refundDetails) {
-    if (!this.isEnabled) {
-      console.log('Email service disabled - Refund notification:', {
-        to: user.email,
-        orderNumber: order.orderNumber,
-        refundAmount: refundDetails.amount
-      });
-      return;
-    }
-
-    const subject = `Refund Processed - ${order.orderNumber}`;
-    const template = this.getRefundNotificationTemplate(order, user, refundDetails);
-
-    await this.sendEmail({
-      to: user.email,
-      subject,
-      html: template,
-      data: {
-        orderNumber: order.orderNumber,
-        refundAmount: refundDetails.amount,
-        refundId: refundDetails.refundId
-      }
-    });
-  }
-
-  /**
-   * Core email sending method - implement with your email service
-   * @param {Object} emailData - Email data
-   */
-  async sendEmail(emailData) {
+    let job
     try {
-      // TODO: Implement with your preferred email service
-      // Examples:
-      
-      // SendGrid:
-      // const sgMail = require('@sendgrid/mail');
-      // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-      // await sgMail.send(emailData);
+      job = await EmailQueue.create({
+        idempotencyKey,
+        type,
+        to: to.toLowerCase().trim(),
+        payload,
+        entityType,
+        entityId,
+        maxAttempts: MAX_ATTEMPTS,
+        nextRetryAt: new Date(),
+        status: 'queued',
+      })
+      console.log(`[EmailService] Queued ${type} â†’ ${to} (${job._id})`)
+    } catch (err) {
+      if (err.code === 11000) {
+        job = await EmailQueue.findOne({ idempotencyKey })
+        console.log(`[EmailService] Duplicate suppressed: ${type} â†’ ${to} (job ${job?._id})`)
+        return job
+      }
+      throw err
+    }
 
-      // AWS SES:
-      // const AWS = require('aws-sdk');
-      // const ses = new AWS.SES({ region: 'us-east-1' });
-      // await ses.sendEmail(emailData).promise();
+    // Attempt inline delivery when the background worker is not running
+    if (!this._workerTimer) {
+      this._deliverJob(job).catch(e =>
+        console.error('[EmailService] Inline delivery error:', e.message)
+      )
+    }
 
-      // Nodemailer:
-      // const nodemailer = require('nodemailer');
-      // const transporter = nodemailer.createTransporter({ ... });
-      // await transporter.sendMail(emailData);
+    return job
+  }
 
-      console.log('Email sent successfully:', {
-        to: emailData.to,
-        subject: emailData.subject
-      });
+  // â”€â”€â”€ Queue Worker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    } catch (error) {
-      console.error('Failed to send email:', error);
-      throw error;
+  startQueueWorker() {
+    if (this._workerTimer) return
+
+    // Reset stale "sending" jobs left by a crashed process
+    EmailQueue.resetStaleSendingJobs().catch(e =>
+      console.warn('[EmailService] Could not reset stale jobs:', e.message)
+    )
+
+    const poll = async () => {
+      try {
+        await this._processQueue()
+      } catch (err) {
+        console.error('[EmailService] Worker error:', err.message)
+      } finally {
+        this._workerTimer = setTimeout(poll, QUEUE_POLL_MS)
+      }
+    }
+
+    this._workerTimer = setTimeout(poll, 0)
+    console.log(`[EmailService] Queue worker started (poll every ${QUEUE_POLL_MS / 1000}s)`)
+  }
+
+  stopQueueWorker() {
+    if (this._workerTimer) {
+      clearTimeout(this._workerTimer)
+      this._workerTimer = null
     }
   }
 
+  async _processQueue() {
+    const now  = new Date()
+    const jobs = await EmailQueue.find({
+      status:      { $in: ['queued', 'retrying'] },
+      nextRetryAt: { $lte: now },
+    }).sort({ nextRetryAt: 1 }).limit(20)
+
+    for (const job of jobs) {
+      await this._deliverJob(job)
+    }
+  }
+
+  async _deliverJob(job) {
+    // Atomically claim the job to prevent double-sending in concurrent workers
+    const claimed = await EmailQueue.findOneAndUpdate(
+      { _id: job._id, status: { $in: ['queued', 'retrying'] } },
+      { $set: { status: 'sending' } },
+      { new: true }
+    )
+    if (!claimed) return
+
+    try {
+      if (!this.isEnabled) {
+        console.log(`[EmailService] Delivery skipped (EMAIL_ENABLED=false): ${job.type} â†’ ${job.to}`)
+      } else {
+        const { subject, html } = renderTemplate(job.type, job.payload)
+        await this.transport.sendMail({
+          from:    this.fromEmail,
+          to:      job.to,
+          subject,
+          html,
+        })
+        console.log(`[EmailService] âœ… Sent ${job.type} â†’ ${job.to}`)
+      }
+
+      await EmailQueue.findByIdAndUpdate(job._id, {
+        $set: { status: 'sent', sentAt: new Date(), lastError: null },
+        $inc: { attempts: 1 },
+      })
+    } catch (err) {
+      const attempts       = job.attempts + 1
+      const hasMoreRetries = attempts < job.maxAttempts
+      const delayMs        = RETRY_DELAYS_MS[attempts - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]
+
+      console.error(`[EmailService] âŒ ${job.type} â†’ ${job.to} [${attempts}/${job.maxAttempts}]: ${err.message}`)
+
+      await EmailQueue.findByIdAndUpdate(job._id, {
+        $set: {
+          status:      hasMoreRetries ? 'retrying' : 'failed',
+          lastError:   err.message,
+          failedAt:    hasMoreRetries ? null : new Date(),
+          nextRetryAt: hasMoreRetries ? new Date(Date.now() + delayMs) : null,
+        },
+        $inc: { attempts: 1 },
+      })
+    }
+  }
+
+  // â”€â”€â”€ Admin helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  async retryJob(jobId) {
+    const job = await EmailQueue.findByIdAndUpdate(
+      jobId,
+      { $set: { status: 'queued', nextRetryAt: new Date(), lastError: null } },
+      { new: true }
+    )
+    if (!job) throw new Error(`Email job ${jobId} not found`)
+    await this._deliverJob(job)
+    return job
+  }
+
+  async getQueueStats() {
+    const stats = await EmailQueue.aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ])
+    const result = { queued: 0, sending: 0, sent: 0, failed: 0, retrying: 0, total: 0 }
+    for (const s of stats) {
+      result[s._id] = s.count
+      result.total += s.count
+    }
+    return result
+  }
+
+  // â”€â”€â”€ Convenience wrappers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  async sendOrderConfirmation(order, user) {
+    return this.enqueue(
+      'order_confirmation',
+      user.email,
+      {
+        userName:       user.name,
+        orderNumber:    order.orderNumber,
+        orderDate:      order.createdAt,
+        totalAmount:    order.total ?? order.totalAmount,
+        paymentMethod:  order.paymentMethod,
+        items: (order.items || []).map(i => ({
+          name:     i.name || i.productId?.name || 'Product',
+          quantity: i.quantity,
+          price:    i.price,
+        })),
+        shippingAddress: order.shippingAddress || {},
+      },
+      'order', order._id
+    )
+  }
+
+  async sendOrderStatusUpdate(order, user, newStatus, trackingInfo = {}) {
+    return this.enqueue(
+      'order_status_update',
+      user.email,
+      {
+        userName:       user.name,
+        orderNumber:    order.orderNumber,
+        newStatus,
+        trackingNumber: trackingInfo.trackingNumber,
+        courierService: trackingInfo.courierService,
+      },
+      'order', order._id, newStatus
+    )
+  }
+
+  async sendOrderRejectionNotification(order, user, reason) {
+    return this.enqueue(
+      'order_rejection',
+      user.email,
+      {
+        userName:    user.name,
+        orderNumber: order.orderNumber,
+        orderDate:   order.createdAt,
+        totalAmount: order.total ?? order.totalAmount,
+        reason,
+      },
+      'order', order._id, 'rejection'
+    )
+  }
+
+  async sendPaymentConfirmation(order, user, paymentDetails) {
+    return this.enqueue(
+      'payment_confirmation',
+      user.email,
+      {
+        userName:    user.name,
+        orderNumber: order.orderNumber,
+        paymentId:   paymentDetails.paymentId,
+        amount:      order.total ?? order.totalAmount,
+        paymentDate: new Date(),
+      },
+      'order', order._id, 'payment'
+    )
+  }
+
+  async sendRefundNotification(order, user, refundDetails) {
+    return this.enqueue(
+      'refund_notification',
+      user.email,
+      {
+        userName:     user.name,
+        orderNumber:  order.orderNumber,
+        refundId:     refundDetails.refundId,
+        refundAmount: refundDetails.amount,
+        refundDate:   new Date(),
+      },
+      'order', order._id, `refund:${refundDetails.refundId}`
+    )
+  }
+
+  async sendArtisanOnboardingSubmitted(artisan) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) { console.warn('[EmailService] No email for artisan', artisan._id); return null }
+    return this.enqueue(
+      'artisan_onboarding_submitted',
+      email,
+      {
+        artisanName:  artisan.name,
+        businessName: artisan.businessInfo?.businessName || artisan.name,
+        submittedAt:  artisan.createdAt || new Date(),
+      },
+      'artisan', artisan._id, 'submitted'
+    )
+  }
+
+  async sendArtisanApproved(artisan) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) { console.warn('[EmailService] No email for artisan', artisan._id); return null }
+    return this.enqueue(
+      'artisan_approved',
+      email,
+      {
+        artisanName:  artisan.name,
+        businessName: artisan.businessInfo?.businessName || artisan.name,
+        approvedAt:   artisan.approvedAt || new Date(),
+      },
+      'artisan', artisan._id, 'approved'
+    )
+  }
+
+  async sendArtisanRejected(artisan, reason) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) { console.warn('[EmailService] No email for artisan', artisan._id); return null }
+    return this.enqueue(
+      'artisan_rejected',
+      email,
+      {
+        artisanName:  artisan.name,
+        businessName: artisan.businessInfo?.businessName || artisan.name,
+        rejectedAt:   artisan.approvedAt || new Date(),
+        reason,
+      },
+      'artisan', artisan._id, 'rejected'
+    )
+  }
+
+  async sendWelcomeUser(user) {
+    return this.enqueue(
+      'welcome_user',
+      user.email,
+      { userName: user.name },
+      'user', user._id
+    )
+  }
+
+  async sendVerificationEmail(user, verificationUrl) {
+    return this.enqueue(
+      'verification_email',
+      user.email,
+      { userName: user.name, verificationUrl },
+      'user', user._id, 'verification'
+    )
+  }
+
+  // ─── Module 5: Artisan & Admin order alert wrappers ───────────────────────────
+
   /**
-   * Get order confirmation email template
+   * Notify an artisan that they have received a new order.
+   * @param {Object} order    – saved Order document (lean or full)
+   * @param {Object} artisan  – Artisan document (must have .email and .name)
    */
-  getOrderConfirmationTemplate(order, user) {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Order Confirmation</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #8B4513; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .order-details { background: white; padding: 15px; margin: 10px 0; border-radius: 5px; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${this.companyName}</h1>
-            <h2>Order Confirmation</h2>
-          </div>
-          
-          <div class="content">
-            <p>Dear ${user.name},</p>
-            <p>Thank you for your order! We've received your order and it's being processed.</p>
-            
-            <div class="order-details">
-              <h3>Order Details</h3>
-              <p><strong>Order Number:</strong> ${order.orderNumber}</p>
-              <p><strong>Order Date:</strong> ${new Date(order.createdAt).toLocaleDateString()}</p>
-              <p><strong>Total Amount:</strong> ₹${order.total.toLocaleString()}</p>
-              <p><strong>Payment Method:</strong> ${order.paymentMethod.replace('_', ' ').toUpperCase()}</p>
-              
-              <h4>Items Ordered:</h4>
-              ${order.items.map(item => `
-                <p>• ${item.name} - Qty: ${item.quantity} - ₹${(item.price * item.quantity).toLocaleString()}</p>
-              `).join('')}
-              
-              <h4>Shipping Address:</h4>
-              <p>
-                ${order.shippingAddress.fullName}<br>
-                ${order.shippingAddress.addressLine1 || order.shippingAddress.street}<br>
-                ${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.zipCode}<br>
-                ${order.shippingAddress.country}
-              </p>
-            </div>
-            
-            <p>We'll send you another email when your order ships.</p>
-            <p>Thank you for supporting our artisans!</p>
-          </div>
-          
-          <div class="footer">
-            <p>&copy; 2024 ${this.companyName}. All rights reserved.</p>
-            <p>This is an automated email. Please do not reply.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+  async sendNewOrderToArtisan(order, artisan) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) {
+      console.warn('[EmailService] sendNewOrderToArtisan: no email for artisan', artisan._id)
+      return null
+    }
+    // Build item list filtered to this artisan
+    const artisanIdStr = artisan._id?.toString()
+    const items = (order.items || [])
+      .filter(i => !artisanIdStr || i.artisanId?.toString() === artisanIdStr)
+      .map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price }))
+
+    return this.enqueue(
+      'new_order_artisan',
+      email,
+      {
+        artisanName:  artisan.name,
+        businessName: artisan.businessInfo?.businessName || artisan.name,
+        orderNumber:  order.orderNumber,
+        orderDate:    order.createdAt || new Date(),
+        items:        items.length ? items : (order.items || []).map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price })),
+        buyerName:    order.shippingAddress?.fullName || 'A customer',
+        buyerCity:    order.shippingAddress?.city     || '',
+        buyerState:   order.shippingAddress?.state    || '',
+        orderTotal:   order.total ?? order.totalAmount ?? 0,
+      },
+      'order', order._id, `artisan:${artisan._id}:new`
+    )
   }
 
   /**
-   * Get order status update email template
+   * Notify an artisan that one of their orders was cancelled.
+   * @param {Object} order         – Order document
+   * @param {Object} artisan       – Artisan document
+   * @param {string} reason        – Cancellation reason
+   * @param {'buyer'|'admin'|'system'} [cancelledBy='buyer']
+   * @param {Object} [feeBreakdown]
    */
-  getOrderStatusTemplate(order, user, status, trackingInfo) {
-    const statusMessages = {
-      'confirmed': 'Your order has been confirmed and is being prepared.',
-      'processing': 'Your order is currently being processed.',
-      'packed': 'Your order has been packed and is ready to ship.',
-      'shipped': 'Great news! Your order has been shipped.',
-      'out_for_delivery': 'Your order is out for delivery.',
-      'delivered': 'Your order has been delivered successfully!',
-      'cancelled': 'Your order has been cancelled.',
-      'returned': 'Your order has been returned.',
-      'refunded': 'Your refund has been processed.'
-    };
+  async sendOrderCancelledToArtisan(order, artisan, reason = '', cancelledBy = 'buyer', feeBreakdown = {}) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) {
+      console.warn('[EmailService] sendOrderCancelledToArtisan: no email for artisan', artisan._id)
+      return null
+    }
+    const artisanIdStr = artisan._id?.toString()
+    const items = (order.items || [])
+      .filter(i => !artisanIdStr || i.artisanId?.toString() === artisanIdStr)
+      .map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price }))
 
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Order Update</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #8B4513; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .status-update { background: white; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #8B4513; }
-          .tracking { background: #e8f5e8; padding: 10px; border-radius: 5px; margin: 10px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${this.companyName}</h1>
-            <h2>Order Update</h2>
-          </div>
-          
-          <div class="content">
-            <p>Dear ${user.name},</p>
-            
-            <div class="status-update">
-              <h3>Order ${order.orderNumber} - ${status.replace('_', ' ').toUpperCase()}</h3>
-              <p>${statusMessages[status] || 'Your order status has been updated.'}</p>
-            </div>
-            
-            ${trackingInfo.trackingNumber ? `
-              <div class="tracking">
-                <h4>Tracking Information</h4>
-                <p><strong>Tracking Number:</strong> ${trackingInfo.trackingNumber}</p>
-                ${trackingInfo.courierService ? `<p><strong>Courier:</strong> ${trackingInfo.courierService}</p>` : ''}
-              </div>
-            ` : ''}
-            
-            <p>You can track your order status anytime by visiting your orders page.</p>
-          </div>
-          
-          <div class="footer">
-            <p>&copy; 2024 ${this.companyName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    return this.enqueue(
+      'order_cancelled_artisan',
+      email,
+      {
+        artisanName:         artisan.name,
+        businessName:        artisan.businessInfo?.businessName || artisan.name,
+        orderNumber:         order.orderNumber,
+        orderDate:           order.createdAt   || new Date(),
+        items:               items.length ? items : (order.items || []).map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price })),
+        cancelledBy,
+        cancellationReason:  reason || order.cancellationReason || 'Not specified',
+        refundableAmount:    feeBreakdown.refundableAmount ?? order.refundableAmount ?? 0,
+      },
+      'order', order._id, `artisan:${artisan._id}:cancelled`
+    )
   }
 
   /**
-   * Get payment confirmation email template
+   * Notify an artisan that a return request was submitted for their order.
+   * @param {Object} order         – Order document
+   * @param {Object} artisan       – Artisan document
+   * @param {string} returnReason  – Buyer's stated return reason
+   * @param {Object} [returnDetails]
    */
-  getPaymentConfirmationTemplate(order, user, paymentDetails) {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Payment Confirmation</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #28a745; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .payment-details { background: white; padding: 15px; margin: 10px 0; border-radius: 5px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${this.companyName}</h1>
-            <h2>Payment Received</h2>
-          </div>
-          
-          <div class="content">
-            <p>Dear ${user.name},</p>
-            <p>We've successfully received your payment for order ${order.orderNumber}.</p>
-            
-            <div class="payment-details">
-              <h3>Payment Details</h3>
-              <p><strong>Order Number:</strong> ${order.orderNumber}</p>
-              <p><strong>Payment ID:</strong> ${paymentDetails.paymentId}</p>
-              <p><strong>Amount:</strong> ₹${order.total.toLocaleString()}</p>
-              <p><strong>Payment Date:</strong> ${new Date().toLocaleDateString()}</p>
-            </div>
-            
-            <p>Your order is now confirmed and will be processed soon.</p>
-          </div>
-          
-          <div class="footer">
-            <p>&copy; 2024 ${this.companyName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+  async sendReturnRequestToArtisan(order, artisan, returnReason = 'Not specified', returnDetails = {}) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) {
+      console.warn('[EmailService] sendReturnRequestToArtisan: no email for artisan', artisan._id)
+      return null
+    }
+    const artisanIdStr = artisan._id?.toString()
+    const items = (order.items || [])
+      .filter(i => !artisanIdStr || i.artisanId?.toString() === artisanIdStr)
+      .map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price }))
+
+    return this.enqueue(
+      'order_return_artisan',
+      email,
+      {
+        artisanName:  artisan.name,
+        businessName: artisan.businessInfo?.businessName || artisan.name,
+        orderNumber:  order.orderNumber,
+        orderDate:    order.createdAt   || new Date(),
+        items:        items.length ? items : (order.items || []).map(i => ({ name: i.name || 'Product', quantity: i.quantity, price: i.price })),
+        buyerName:    order.shippingAddress?.fullName || 'The buyer',
+        returnReason,
+        deliveredAt:  order.deliveredAt ?? returnDetails.deliveredAt ?? null,
+      },
+      'order', order._id, `artisan:${artisan._id}:return`
+    )
   }
 
   /**
-   * Get refund notification email template
+   * Send a critical order alert to the platform Admin email.
+   * The admin address is taken from the ADMIN_EMAIL env variable; if not set,
+   * falls back to SMTP_USER (the sending address).
+   *
+   * @param {'high_value'|'bulk_cancellation'|'return_spike'|'payment_failure'|'fraud_flag'|'artisan_cancellation'} alertType
+   * @param {Object} order
+   * @param {Object} [details]  Extra key/value pairs shown in the alert table
    */
-  getRefundNotificationTemplate(order, user, refundDetails) {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Refund Processed</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #6c757d; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .refund-details { background: white; padding: 15px; margin: 10px 0; border-radius: 5px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${this.companyName}</h1>
-            <h2>Refund Processed</h2>
-          </div>
-          
-          <div class="content">
-            <p>Dear ${user.name},</p>
-            <p>Your refund for order ${order.orderNumber} has been processed.</p>
-            
-            <div class="refund-details">
-              <h3>Refund Details</h3>
-              <p><strong>Order Number:</strong> ${order.orderNumber}</p>
-              <p><strong>Refund ID:</strong> ${refundDetails.refundId}</p>
-              <p><strong>Refund Amount:</strong> ₹${refundDetails.amount.toLocaleString()}</p>
-              <p><strong>Refund Date:</strong> ${new Date().toLocaleDateString()}</p>
-            </div>
-            
-            <p>The refund will be credited to your original payment method within 5-7 business days.</p>
-          </div>
-          
-          <div class="footer">
-            <p>&copy; 2024 ${this.companyName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+  async sendAdminOrderAlert(alertType, order, details = {}) {
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SMTP_USER
+    if (!adminEmail) {
+      console.warn('[EmailService] sendAdminOrderAlert: ADMIN_EMAIL not configured, alert suppressed')
+      return null
+    }
+    // Build artisanName from first item (best effort)
+    const artisanName = details.artisanName
+      || (order.items?.[0]?.artisanId?.name)
+      || 'unknown'
+
+    return this.enqueue(
+      'admin_order_alert',
+      adminEmail,
+      {
+        alertType,
+        orderNumber:       order.orderNumber,
+        orderDate:         order.createdAt ?? new Date(),
+        totalAmount:       order.total ?? order.totalAmount ?? 0,
+        buyerEmail:        order.shippingAddress?.email || details.buyerEmail || 'unknown',
+        artisanName,
+        details,
+        adminDashboardUrl: process.env.ADMIN_DASHBOARD_URL || 'https://zaymazone.com/admin',
+      },
+      'order', order._id, `admin:${alertType}`
+    )
+  }
+
+  /**
+   * Sent once when all required documents are approved and the artisan earns the verified badge.
+   * @param {Object} artisan  – populated Artisan document
+   * @param {Object} badge    – verifiedBadge data (badgeId, tier, issuedAt, metadata)
+   */
+  async sendVerificationSuccess(artisan, badge = {}) {
+    const email = artisan.email || artisan.businessInfo?.contact?.email
+    if (!email) { console.warn('[EmailService] No email for artisan', artisan._id); return null }
+    return this.enqueue(
+      'artisan_verification_success',
+      email,
+      {
+        artisanName:         artisan.name,
+        businessName:        artisan.businessInfo?.businessName || artisan.name,
+        badgeId:             badge.badgeId             || '',
+        tier:                badge.tier                || 'standard',
+        verifiedAt:          badge.issuedAt            || new Date(),
+        verificationScore:   badge.metadata?.verificationScore ?? 100,
+        documentsVerified:   badge.metadata?.documentsVerified || [],
+      },
+      'artisan', artisan._id, 'verification_success'
+    )
   }
 }
 
-export default new EmailService();
+export default new EmailService()
+

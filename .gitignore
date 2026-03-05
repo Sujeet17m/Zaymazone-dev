@@ -12,9 +12,34 @@ dist
 dist-ssr
 *.local
 
-# Environment variables (contain secrets)
+# Environment variables (contain secrets — never commit real values)
 .env
+.env.local
+.env.production
+.env.staging
 server/.env
+server/.env.local
+server/.env.production
+
+# Firebase service-account keys
+firebase-service-account*.json
+server/firebase-service-account*.json
+
+# Vite build artefacts
+vite.config.ts.timestamp-*.mjs
+
+# Server runtime files
+server/server-err.txt
+server/server-out.txt
+server/server.pid
+
+# Operational audit dumps (contain PII)
+server/artisan_audit.txt
+server/user_audit.txt
+server/user_audit_hardcoded.txt
+
+# Temporary server directory
+server/temp/
 
 # Editor directories and files
 .vscode/*

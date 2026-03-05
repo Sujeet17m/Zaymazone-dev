@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,10 +18,8 @@ import {
   Heart, 
   Palette, 
   ShoppingBag, 
-  Star,
   Sparkles,
   ChevronDown,
-  Gift,
   Crown,
   Moon,
   Sun
@@ -61,19 +59,9 @@ export const Navigation = () => {
       icon: <ShoppingBag className="h-4 w-4" />
     },
     { 
-      to: "/categories", 
-      label: "Categories", 
-      icon: <Gift className="h-4 w-4" /> 
-    },
-    { 
       to: "/artisans", 
       label: "Artisans", 
       icon: <Crown className="h-4 w-4" />
-    },
-    { 
-      to: "/blog", 
-      label: "Blog", 
-      icon: <Star className="h-4 w-4" /> 
     },
     { 
       to: "/about", 
@@ -147,7 +135,7 @@ export const Navigation = () => {
         transition={{ duration: 0.4, ease: "easeInOut" }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
+          <div className="flex items-center justify-between h-14 sm:h-20">
             {/* Logo */}
             <motion.div 
               className="flex items-center"
@@ -163,7 +151,7 @@ export const Navigation = () => {
                   <img
                     src="/logo.png"
                     alt="ZAYMAZONE Logo"
-                    className="h-28 w-auto object-contain group-hover:scale-110 transition-all duration-500 drop-shadow-xl filter group-hover:brightness-110 dark:group-hover:brightness-125 dark:drop-shadow-2xl"
+                    className="h-12 sm:h-20 md:h-28 w-auto object-contain group-hover:scale-110 transition-all duration-500 drop-shadow-xl filter group-hover:brightness-110 dark:group-hover:brightness-125 dark:drop-shadow-2xl"
                   />
                 </div>
               </Link>
@@ -176,7 +164,8 @@ export const Navigation = () => {
 
             {/* Right Side Actions */}
             <div className="flex items-center space-x-2">
-              {/* Theme Toggle */}
+              {/* Theme Toggle — hidden on mobile to reduce icon crowding */}
+              <div className="hidden sm:block">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button 
                   variant="ghost" 
@@ -191,6 +180,7 @@ export const Navigation = () => {
                   )}
                 </Button>
               </motion.div>
+              </div>
 
               {/* Search */}
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
@@ -272,6 +262,7 @@ export const Navigation = () => {
                   </motion.div>
                 </SheetTrigger>
                 <SheetContent side="right" className="w-[300px] sm:w-[400px] bg-background/98 backdrop-blur-xl border-primary/20 dark:bg-background/98 dark:backdrop-blur-2xl dark:border-primary/30 dark:shadow-dark-floating">
+                  <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
                   <motion.div
                     className="flex flex-col space-y-6 mt-6"
                     initial="hidden"

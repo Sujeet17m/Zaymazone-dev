@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { sellerApi, SellerFormData } from "@/services/api";
 import { useFormValidation } from "@/hooks/use-form-validation";
+import { VideoUpload } from "@/components/VideoUpload";
 import { Loader2 } from "lucide-react";
 
 import { Navigation } from "@/components/Navigation";
@@ -37,6 +38,7 @@ export default function SellerOnboarding() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emailConflictError, setEmailConflictError] = useState('');
 
   const [formData, setFormData] = useState({
     // Step 1: Basic Info
@@ -91,7 +93,7 @@ export default function SellerOnboarding() {
     
     // Step 6: Seller Story
     story: "",
-    craftVideo: null as File | null
+    craftVideo: "" as string
   });
 
   const { errors, validateStep } = useFormValidation(formData);
@@ -312,8 +314,45 @@ export default function SellerOnboarding() {
     { icon: Award, title: "Master Artisan", desc: "Earn craft excellence badges" }
   ];
 
+  // Called on email blur and before step-1 advancement.
+  // Returns true if a conflict was found (blocks advancement).
+  const checkEmailExists = async (email: string): Promise<boolean> => {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
+    try {
+      const result = await sellerApi.checkEmail(email);
+      if (result.existsAsCustomer && result.existsAsArtisan) {
+        setEmailConflictError('This email is already registered. Please use a different email.');
+        return true;
+      } else if (result.existsAsCustomer) {
+        setEmailConflictError('This email is already registered as a customer account. Please use a different email.');
+        return true;
+      } else if (result.existsAsArtisan) {
+        setEmailConflictError('This email is already registered as an artisan account. Please use a different email.');
+        return true;
+      } else {
+        setEmailConflictError('');
+        return false;
+      }
+    } catch {
+      // Network failure — silently ignore
+      return false;
+    }
+  };
+
+  const handleEmailBlur = async () => {
+    await checkEmailExists(formData.email);
+  };
+
   const handleNext = async () => {
     if (validateStep(currentStep)) {
+      // Step 1 — async cross-account email uniqueness check
+      if (currentStep === 1) {
+        setIsLoading(true);
+        const hasConflict = await checkEmailExists(formData.email);
+        setIsLoading(false);
+        if (hasConflict) return;
+      }
+
       // Special validations for specific steps
       if (currentStep === 2 && formData.sellerType === 'gst') {
         setIsLoading(true);
@@ -469,6 +508,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="businessName">Shop / Brand Name *</Label>
                           <Input
                             id="businessName"
+                            name="businessName"
+                            autoComplete="organization"
                             value={formData.businessName}
                             onChange={(e) => setFormData({...formData, businessName: e.target.value})}
                             placeholder="e.g., Kashmiri Heritage Crafts"
@@ -478,6 +519,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="ownerName">Full Name *</Label>
                           <Input
                             id="ownerName"
+                            name="ownerName"
+                            autoComplete="name"
                             value={formData.ownerName}
                             onChange={(e) => setFormData({...formData, ownerName: e.target.value})}
                             placeholder="Your full name"
@@ -490,6 +533,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="phone">Mobile Number *</Label>
                           <Input
                             id="phone"
+                            name="phone"
+                            autoComplete="tel"
                             value={formData.phone}
                             onChange={(e) => setFormData({...formData, phone: e.target.value})}
                             placeholder="+91 9876543210"
@@ -499,12 +544,25 @@ export default function SellerOnboarding() {
                           <Label htmlFor="email">Email Address *</Label>
                           <Input
                             id="email"
+                            name="email"
                             type="email"
+                            autoComplete="email"
                             value={formData.email}
-                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                            onChange={(e) => {
+                              setFormData({...formData, email: e.target.value});
+                              setEmailConflictError('');
+                            }}
+                            onBlur={handleEmailBlur}
                             placeholder="your@email.com"
                             required
+                            className={emailConflictError || errors.email ? "border-red-500" : ""}
                           />
+                          {errors.email && (
+                            <p className="text-sm text-red-500 mt-1">{errors.email}</p>
+                          )}
+                          {emailConflictError && (
+                            <p className="text-sm text-red-500 mt-1">{emailConflictError}</p>
+                          )}
                         </div>
                       </div>
 
@@ -513,7 +571,9 @@ export default function SellerOnboarding() {
                           <Label htmlFor="password">Password *</Label>
                           <Input
                             id="password"
+                            name="password"
                             type="password"
+                            autoComplete="new-password"
                             value={formData.password}
                             onChange={(e) => setFormData({...formData, password: e.target.value})}
                             placeholder="Create a strong password (min 6 characters)"
@@ -531,7 +591,9 @@ export default function SellerOnboarding() {
                           <Label htmlFor="confirmPassword">Re-enter Password *</Label>
                           <Input
                             id="confirmPassword"
+                            name="confirmPassword"
                             type="password"
+                            autoComplete="new-password"
                             value={formData.confirmPassword}
                             onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
                             placeholder="Re-enter your password"
@@ -549,6 +611,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="village">Village / Town *</Label>
                           <Input
                             id="village"
+                            name="village"
+                            autoComplete="address-level3"
                             value={formData.address.village}
                             onChange={(e) => setFormData({
                               ...formData,
@@ -561,6 +625,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="district">District *</Label>
                           <Input
                             id="district"
+                            name="district"
+                            autoComplete="address-level2"
                             value={formData.address.district}
                             onChange={(e) => setFormData({
                               ...formData,
@@ -576,6 +642,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="state">State *</Label>
                           <Input
                             id="state"
+                            name="state"
+                            autoComplete="address-level1"
                             value={formData.address.state}
                             onChange={(e) => setFormData({
                               ...formData,
@@ -588,6 +656,8 @@ export default function SellerOnboarding() {
                           <Label htmlFor="pincode">Pincode *</Label>
                           <Input
                             id="pincode"
+                            name="pincode"
+                            autoComplete="postal-code"
                             value={formData.address.pincode}
                             onChange={(e) => setFormData({
                               ...formData,
@@ -602,7 +672,9 @@ export default function SellerOnboarding() {
                         <Label htmlFor="yearsOfExperience">Years of Experience in Craftwork *</Label>
                         <Input
                           id="yearsOfExperience"
+                          name="yearsOfExperience"
                           type="number"
+                          autoComplete="off"
                           value={formData.yearsOfExperience}
                           onChange={(e) => setFormData({...formData, yearsOfExperience: e.target.value})}
                           placeholder="Enter years of experience"
@@ -610,7 +682,7 @@ export default function SellerOnboarding() {
                       </div>
 
                       <div>
-                        <Label>Profile Photo</Label>
+                        <Label htmlFor="profilePhoto">Profile Photo</Label>
                         <div
                           className={`border-2 border-dashed ${errors.profilePhoto ? 'border-red-500' : 'border-muted'} rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer`}
                           onClick={() => document.getElementById('profilePhoto')?.click()}
@@ -709,8 +781,9 @@ export default function SellerOnboarding() {
                           </div>
                           <div>
                             <Label>Aadhaar Card *</Label>
+                            <div className="relative mt-2">
                             <div 
-                              className={`border-2 border-dashed ${errors.aadhaarProof ? 'border-red-500' : 'border-muted'} rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer mt-2`}
+                              className={`border-2 border-dashed ${errors.aadhaarProof ? 'border-red-500' : 'border-muted'} rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer`}
                               onClick={() => document.getElementById('aadhaarProof')?.click()}
                               role="button"
                               tabIndex={0}
@@ -728,17 +801,6 @@ export default function SellerOnboarding() {
                                   <span className="text-sm font-medium text-primary">
                                     {formData.aadhaarProof.name}
                                   </span>
-                                  <button
-                                    type="button"
-                                    className="p-1 hover:bg-red-100 rounded-full"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setFormData({ ...formData, aadhaarProof: null });
-                                    }}
-                                    aria-label="Remove Aadhaar card"
-                                  >
-                                    ×
-                                  </button>
                                 </div>
                               ) : (
                                 <>
@@ -747,6 +809,20 @@ export default function SellerOnboarding() {
                                   <p className="text-xs text-muted-foreground">PDF, JPG, PNG up to 5MB</p>
                                 </>
                               )}
+                            </div>
+                            {formData.aadhaarProof && (
+                              <button
+                                type="button"
+                                className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded-full"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFormData({ ...formData, aadhaarProof: null });
+                                }}
+                                aria-label="Remove Aadhaar card"
+                              >
+                                ×
+                              </button>
+                            )}
                             </div>
                             <input
                               type="file"
@@ -776,8 +852,9 @@ export default function SellerOnboarding() {
                           </div>
                           <div>
                             <Label>GST Certificate *</Label>
+                            <div className="relative mt-2">
                             <div 
-                              className={`border-2 border-dashed ${errors.gstCertificate ? 'border-red-500' : 'border-muted'} rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer mt-2`}
+                              className={`border-2 border-dashed ${errors.gstCertificate ? 'border-red-500' : 'border-muted'} rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer`}
                               onClick={() => document.getElementById('gstCertificate')?.click()}
                               role="button"
                               tabIndex={0}
@@ -795,17 +872,6 @@ export default function SellerOnboarding() {
                                   <span className="text-sm font-medium text-primary">
                                     {formData.gstCertificate.name}
                                   </span>
-                                  <button
-                                    type="button"
-                                    className="p-1 hover:bg-red-100 rounded-full"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setFormData({ ...formData, gstCertificate: null });
-                                    }}
-                                    aria-label="Remove GST certificate"
-                                  >
-                                    ×
-                                  </button>
                                 </div>
                               ) : (
                                 <>
@@ -814,6 +880,20 @@ export default function SellerOnboarding() {
                                   <p className="text-xs text-muted-foreground">PDF, JPG, PNG up to 5MB</p>
                                 </>
                               )}
+                            </div>
+                            {formData.gstCertificate && (
+                              <button
+                                type="button"
+                                className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded-full"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFormData({ ...formData, gstCertificate: null });
+                                }}
+                                aria-label="Remove GST certificate"
+                              >
+                                ×
+                              </button>
+                            )}
                             </div>
                             <input
                               type="file"
@@ -1210,11 +1290,13 @@ export default function SellerOnboarding() {
                         />
                       </div>
 
-                      <div className="border-2 border-dashed border-muted rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer">
-                        <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-sm font-medium">Upload a Video of Your Craft</p>
-                        <p className="text-xs text-muted-foreground">MP4, MOV up to 50MB</p>
-                        <p className="text-xs text-muted-foreground mt-2">Share a short video of you or your team making the craft</p>
+                      <div>
+                        <p className="text-sm font-medium mb-1">Upload a Video of Your Craft <span className="text-muted-foreground font-normal">(optional)</span></p>
+                        <p className="text-xs text-muted-foreground mb-3">Share a short video of you or your team making the craft</p>
+                        <VideoUpload
+                          value={formData.craftVideo}
+                          onChange={(url) => setFormData({ ...formData, craftVideo: url })}
+                        />
                       </div>
 
                       <div className="p-4 bg-muted/30 rounded-lg">

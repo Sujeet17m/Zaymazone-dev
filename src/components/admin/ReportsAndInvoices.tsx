@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,7 @@ import { adminService } from "@/services/adminService";
 import { useToast } from "@/hooks/use-toast";
 
 export function ReportsAndInvoices() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("reports");
   const [dateRange, setDateRange] = useState("30days");
   const [reportType, setReportType] = useState("sales");
@@ -65,13 +67,15 @@ export function ReportsAndInvoices() {
   };
 
   const handleGenerateReport = () => {
-    // API call to generate report
-    console.log(`Generating ${reportType} report for ${dateRange}`);
+    toast({
+      title: "Generating report…",
+      description: `${reportType.charAt(0).toUpperCase() + reportType.slice(1)} report for ${dateRange} is being prepared.`,
+    });
   };
 
-  const handleDownloadInvoice = (invoiceId) => {
-    // API call to download invoice
-    console.log(`Downloading invoice ${invoiceId}`);
+  const handleViewInvoice = (orderId: string) => {
+    if (!orderId) return;
+    navigate(`/order/${orderId}/invoice?admin=true`);
   };
 
   if (loading) {
@@ -320,9 +324,10 @@ export function ReportsAndInvoices() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleDownloadInvoice(invoice.id)}
+                            onClick={() => handleViewInvoice(invoice.orderId)}
+                            title="View Invoice"
                           >
-                            <Download className="w-4 h-4" />
+                            <FileText className="w-4 h-4" />
                           </Button>
                         </TableCell>
                       </TableRow>

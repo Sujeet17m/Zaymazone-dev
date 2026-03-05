@@ -1,0 +1,24 @@
+# Environment variables — never commit actual credentials
+.env
+.env.local
+.env.production
+.env.staging
+
+# Firebase service-account key file
+firebase-service-account*.json
+
+# Server runtime files
+server-err.txt
+server-out.txt
+server.pid
+
+# Operational audit dumps (contain PII)
+artisan_audit.txt
+user_audit.txt
+user_audit_hardcoded.txt
+
+# Temporary working directory
+temp/
+
+# Node
+node_modules/

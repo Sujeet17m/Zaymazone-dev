@@ -3,6 +3,7 @@ import { authenticateToken } from '../middleware/firebase-auth.js';
 import Artisan from '../models/Artisan.js';
 import User from '../models/User.js';
 import bcrypt from 'bcrypt';
+import emailService from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -10,9 +11,7 @@ const router = express.Router();
 // Creates or updates artisan profile with pending approval status
 router.post('/artisan', authenticateToken, async (req, res) => {
   try {
-    console.log('Onboarding request received');
     const userId = req.user._id;
-    console.log('User ID:', userId);
     const {
       businessName,
       ownerName,
@@ -81,14 +80,12 @@ router.post('/artisan', authenticateToken, async (req, res) => {
       });
     }
 
-    console.log('Validation passed, processing data');
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Check if artisan profile already exists
     let artisan = await Artisan.findOne({ userId });
-    console.log('Existing artisan found:', !!artisan);
 
     if (artisan) {
       // Update existing artisan profile
@@ -226,9 +223,12 @@ router.post('/artisan', authenticateToken, async (req, res) => {
       });
     }
 
-    console.log('About to save artisan...');
     await artisan.save();
-    console.log('Artisan saved successfully');
+
+    // Fire-and-forget: notify artisan that their application was received
+    emailService.sendArtisanOnboardingSubmitted(artisan).catch(e =>
+      console.error('[onboarding] submission email error:', e.message)
+    );
 
     res.status(200).json({
       success: true,
@@ -244,8 +244,7 @@ router.post('/artisan', authenticateToken, async (req, res) => {
     console.error('Onboarding error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to submit onboarding form',
-      error: error.message
+      message: 'Failed to submit onboarding form'
     });
   }
 });
@@ -278,8 +277,7 @@ router.get('/artisan/status', authenticateToken, async (req, res) => {
     console.error('Error fetching artisan status:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch artisan status',
-      error: error.message
+      message: 'Failed to fetch artisan status'
     });
   }
 });

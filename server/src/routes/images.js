@@ -104,6 +104,7 @@ router.get('/:filename', async (req, res) => {
     res.set('Content-Type', imageDoc.contentType)
     res.set('Content-Length', imageDoc.size)
     res.set('Cache-Control', 'public, max-age=31536000') // Cache for 1 year
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin') // allow cross-origin img loads
 
     // Stream image from GridFS
     const downloadStream = getImageStream(imageDoc.gridfsId)

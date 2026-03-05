@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { ImageUpload } from '@/components/ImageUpload';
+import { VideoUpload } from '@/components/VideoUpload';
 import { Navigation } from '@/components/Navigation';
 import { Footer } from '@/components/Footer';
 import { 
@@ -376,9 +377,9 @@ export function SellerOnboardingForm() {
         formDataToSend.append('aadhaarProof', aadhaarFile);
       }
 
+      // craftVideo is already a URL (uploaded by VideoUpload component) — append as plain text
       if (formData.documents.craftVideo) {
-        const videoFile = await base64ToFile(formData.documents.craftVideo, 'craft-video.mp4');
-        formDataToSend.append('craftVideo', videoFile);
+        formDataToSend.append('craftVideoUrl', formData.documents.craftVideo);
       }
 
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/seller-onboarding`, {
@@ -784,8 +785,9 @@ export function SellerOnboardingForm() {
                     <Input
                       id="minPrice"
                       type="number"
+                      min="0"
                       value={formData.productInfo.priceRange.min}
-                      onChange={(e) => updateDoubleNestedFormData('productInfo', 'priceRange', 'min', parseInt(e.target.value) || 0)}
+                      onChange={(e) => updateDoubleNestedFormData('productInfo', 'priceRange', 'min', Math.max(0, parseInt(e.target.value) || 0))}
                       placeholder="Min price"
                     />
                   </div>
@@ -794,8 +796,9 @@ export function SellerOnboardingForm() {
                     <Input
                       id="maxPrice"
                       type="number"
+                      min="0"
                       value={formData.productInfo.priceRange.max}
-                      onChange={(e) => updateDoubleNestedFormData('productInfo', 'priceRange', 'max', parseInt(e.target.value) || 0)}
+                      onChange={(e) => updateDoubleNestedFormData('productInfo', 'priceRange', 'max', Math.max(0, parseInt(e.target.value) || 0))}
                       placeholder="Max price"
                     />
                   </div>
@@ -919,13 +922,9 @@ export function SellerOnboardingForm() {
                 </div>
                 <div>
                   <Label>Craft Video</Label>
-                  <ImageUpload
-                    images={formData.documents.craftVideo ? [formData.documents.craftVideo] : []}
-                    onImagesChange={(images) => updateNestedFormData('documents', 'craftVideo', images[0] || '')}
-                    maxImages={1}
-                    singleMode={true}
-                    category="videos"
-                    fileType="video"
+                  <VideoUpload
+                    value={formData.documents.craftVideo}
+                    onChange={(url) => updateNestedFormData('documents', 'craftVideo', url)}
                   />
                 </div>
               </div>

@@ -163,7 +163,8 @@ export function ArtisanManagement() {
     aadhaarProof: false,
     craftVideo: false,
     productPhotos: false,
-    bankDetails: false
+    bankDetails: false,
+    isVerified: false
   });
   const [formData, setFormData] = useState({
     name: "",
@@ -325,6 +326,9 @@ export function ArtisanManagement() {
     if (!editingArtisan) return;
 
     try {
+      // Send data using the same field aliases the backend admin PUT route expects.
+      // The backend maps phone→businessInfo.contact.phone, website→socials.website,
+      // socialMedia→socials, businessDetails→businessInfo so nested docs are safe.
       const artisanData = {
         name: formData.name,
         bio: formData.bio,
@@ -337,17 +341,16 @@ export function ArtisanManagement() {
         coverImage: formData.coverImage[0] || "",
         specialties: formData.specialties.split(',').map(s => s.trim()).filter(s => s),
         experience: parseInt(formData.experience) || 0,
-        phone: formData.phone || undefined,
         email: formData.email || undefined,
+        phone: formData.phone || undefined,
         website: formData.website || undefined,
         socialMedia: {
           instagram: formData.socialMedia.instagram || undefined,
-          facebook: formData.socialMedia.facebook || undefined,
-          twitter: formData.socialMedia.twitter || undefined
+          facebook:  formData.socialMedia.facebook  || undefined
         },
         businessDetails: {
           businessName: formData.businessDetails.businessName || undefined,
-          gstNumber: formData.businessDetails.gstNumber || undefined,
+          gstNumber:    formData.businessDetails.gstNumber    || undefined,
           businessType: formData.businessDetails.businessType || undefined
         }
       };
@@ -401,7 +404,8 @@ export function ArtisanManagement() {
       aadhaarProof: artisan.documentVerification?.aadhaarProof || false,
       craftVideo: artisan.documentVerification?.craftVideo || false,
       productPhotos: artisan.documentVerification?.productPhotos || false,
-      bankDetails: artisan.documentVerification?.bankDetails || false
+      bankDetails: artisan.documentVerification?.bankDetails || false,
+      isVerified: artisan.verification?.isVerified || false
     });
     setIsVerificationDialogOpen(true);
   };
@@ -417,7 +421,17 @@ export function ArtisanManagement() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ documentVerification: verificationData })
+        body: JSON.stringify({
+          documentVerification: {
+            profilePhoto: verificationData.profilePhoto,
+            gstCertificate: verificationData.gstCertificate,
+            aadhaarProof: verificationData.aadhaarProof,
+            craftVideo: verificationData.craftVideo,
+            productPhotos: verificationData.productPhotos,
+            bankDetails: verificationData.bankDetails
+          },
+          isVerified: verificationData.isVerified
+        })
       });
 
       if (response.ok) {
@@ -441,6 +455,19 @@ export function ArtisanManagement() {
     }
   };
 
+  const handleAcknowledgeChanges = async (artisan: Artisan) => {
+    try {
+      await adminService.acknowledgeArtisanChanges(artisan._id);
+      toast({ title: 'Changes marked as reviewed' });
+      setIsViewDialogOpen(false);
+      setEditingArtisan(null);
+      loadArtisans();
+    } catch (error) {
+      console.error('Error acknowledging changes:', error);
+      toast({ title: 'Error', description: 'Failed to mark changes as reviewed', variant: 'destructive' });
+    }
+  };
+
   const openEditDialog = (artisan: Artisan) => {
     setEditingArtisan(artisan);
     setFormData({
@@ -453,19 +480,25 @@ export function ArtisanManagement() {
       coverImage: artisan.coverImage ? [artisan.coverImage] : [],
       specialties: artisan.specialties.join(', '),
       experience: artisan.experience?.toString() || '0',
-      userId: artisan.userId || "",
-      phone: artisan.phone || "",
-      email: artisan.email || "",
-      website: artisan.website || "",
+      userId: (artisan.userId as unknown as string) || "",
+      // Phone is stored inside businessInfo.contact.phone in MongoDB
+      phone: artisan.businessInfo?.contact?.phone || "",
+      // Email can be top-level on the artisan doc or inside businessInfo.contact
+      email: artisan.email || artisan.businessInfo?.contact?.email || "",
+      // Website is stored inside socials sub-doc
+      website: artisan.socials?.website || "",
       socialMedia: {
-        instagram: artisan.socialMedia?.instagram || "",
-        facebook: artisan.socialMedia?.facebook || "",
-        twitter: artisan.socialMedia?.twitter || ""
+        // Social links are stored in the `socials` sub-doc (not `socialMedia`)
+        instagram: artisan.socials?.instagram || "",
+        facebook:  artisan.socials?.facebook  || "",
+        twitter: ""
       },
       businessDetails: {
-        businessName: artisan.businessDetails?.businessName || "",
-        gstNumber: artisan.businessDetails?.gstNumber || "",
-        businessType: artisan.businessDetails?.businessType || ""
+        // Business info is stored in `businessInfo` (not `businessDetails`)
+        businessName: artisan.businessInfo?.businessName || "",
+        gstNumber:    artisan.businessInfo?.gstNumber    || "",
+        // sellerType in schema was mapped to businessType in the form
+        businessType: artisan.businessInfo?.sellerType   || ""
       },
       isVerified: artisan.verification?.isVerified || false,
       isActive: artisan.isActive
@@ -1884,6 +1917,59 @@ export function ArtisanManagement() {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Pending Changes — shown when artisan edited their profile after approval */}
+              {editingArtisan.pendingChanges?.hasChanges && (
+                <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg flex items-center gap-2 text-orange-800 dark:text-orange-200">
+                      <Bell className="w-5 h-5" />
+                      Artisan Changed Details After Approval
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Modified fields</p>
+                      <div className="flex flex-wrap gap-2">
+                        {editingArtisan.pendingChanges.changedFields.map((field) => (
+                          <Badge key={field} variant="outline" className="bg-orange-100 text-orange-700 border-orange-300">
+                            {field}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    {editingArtisan.pendingChanges.changedAt && (
+                      <p className="text-xs text-orange-600 dark:text-orange-400">
+                        Last changed: {new Date(editingArtisan.pendingChanges.changedAt).toLocaleString()}
+                      </p>
+                    )}
+                    {editingArtisan.pendingChanges.changes && Object.keys(editingArtisan.pendingChanges.changes).length > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-muted-foreground mb-2">New values submitted</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {Object.entries(editingArtisan.pendingChanges.changes).map(([key, value]) => (
+                            <div key={key} className="bg-white dark:bg-gray-900 rounded p-2 border border-orange-200">
+                              <span className="font-semibold capitalize">{key.replace(/([A-Z])/g, ' $1')}: </span>
+                              <span className="text-muted-foreground">
+                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-orange-400 text-orange-700 hover:bg-orange-100"
+                      onClick={() => handleAcknowledgeChanges(editingArtisan)}
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Mark as Reviewed
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
         </DialogContent>
@@ -2083,18 +2169,42 @@ export function ArtisanManagement() {
               </div>
 
               {/* Summary */}
-              <div className="border-t pt-4 mt-4">
+              <div className="border-t pt-4 mt-4 space-y-4">
                 <p className="text-sm text-muted-foreground mb-2">Verification Summary:</p>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">
-                    {Object.values(verificationData).filter(Boolean).length} of 6 documents verified
+                    {[verificationData.profilePhoto, verificationData.gstCertificate, verificationData.aadhaarProof, verificationData.craftVideo, verificationData.productPhotos, verificationData.bankDetails].filter(Boolean).length} of 6 documents verified
                   </span>
-                  {Object.values(verificationData).every(Boolean) && (
-                    <Badge variant="default" className="ml-2">
-                      <CheckCircle className="w-3 h-3 mr-1" />
-                      Fully Verified
-                    </Badge>
-                  )}
+                </div>
+
+                {/* Overall verified toggle */}
+                <div className={`flex items-center justify-between p-3 border-2 rounded-lg ${
+                  verificationData.isVerified ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : 'border-gray-200'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {verificationData.isVerified ? (
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-red-500" />
+                    )}
+                    <div>
+                      <p className="font-semibold">Mark Artisan as Verified</p>
+                      <p className="text-xs text-muted-foreground">
+                        Controls the ✓/✗ badge shown next to the artisan's name
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={verificationData.isVerified}
+                      onChange={(e) => setVerificationData({ ...verificationData, isVerified: e.target.checked })}
+                      className="form-checkbox h-5 w-5"
+                    />
+                    <span className="text-sm font-medium">
+                      {verificationData.isVerified ? 'Verified' : 'Not Verified'}
+                    </span>
+                  </label>
                 </div>
               </div>
             </div>

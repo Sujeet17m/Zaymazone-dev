@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,40 +18,44 @@ export const AnimatedInput = forwardRef<HTMLInputElement, AnimatedInputProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [hasValue, setHasValue] = useState(!!value);
 
+    useEffect(() => {
+      setHasValue(!!value);
+    }, [value]);
+
     const handleFocus = () => setIsFocused(true);
     const handleBlur = () => {
       setIsFocused(false);
       setHasValue(!!value);
     };
 
+    const isLabelFloating = isFocused || hasValue;
+
     return (
       <motion.div
         className={cn("relative", className)}
         initial={false}
         animate={{
-          scale: isFocused ? 1.02 : 1,
+          scale: isFocused ? 1.01 : 1,
         }}
         transition={{ duration: 0.2 }}
       >
         <Label
           htmlFor={id}
           className={cn(
-            "absolute left-3 transition-all duration-200 pointer-events-none",
-            (isFocused || hasValue)
-              ? "top-1 text-xs text-primary font-medium"
-              : "top-1/2 -translate-y-1/2 text-muted-foreground"
+            "absolute left-3 transition-all duration-200 pointer-events-none z-10 bg-background px-1",
+            isLabelFloating
+              ? "-top-2.5 text-xs text-primary font-medium"
+              : "top-3 text-sm text-muted-foreground"
           )}
         >
-          {label} {required && "*"}
+          {label} {required && <span className="text-destructive">*</span>}
         </Label>
         <motion.div
           animate={{
             boxShadow: isFocused ? "0 0 0 2px hsl(var(--primary) / 0.2)" : "none",
           }}
           transition={{ duration: 0.2 }}
-          className={`border transition-colors duration-200 ${
-            isFocused ? "border-primary" : "border-border"
-          }`}
+          className="rounded-md"
         >
           <Input
             ref={ref}
@@ -64,8 +68,9 @@ export const AnimatedInput = forwardRef<HTMLInputElement, AnimatedInputProps>(
             onFocus={handleFocus}
             onBlur={handleBlur}
             className={cn(
-              "pt-6 pb-2 transition-all duration-200",
-              isFocused && "ring-0"
+              "pt-3 pb-3 h-12 transition-all duration-200 border-2",
+              isFocused ? "border-primary ring-0" : "border-input",
+              isLabelFloating && "pt-3"
             )}
             {...props}
           />

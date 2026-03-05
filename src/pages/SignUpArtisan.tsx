@@ -133,6 +133,7 @@ const SignUpArtisan = () => {
                     id="name"
                     name="name"
                     type="text"
+                    autoComplete="name"
                     value={formData.name}
                     onChange={handleChange}
                     placeholder="Enter your full name"
@@ -150,6 +151,7 @@ const SignUpArtisan = () => {
                     id="email"
                     name="email"
                     type="email"
+                    autoComplete="email"
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="Enter your email"
@@ -183,6 +185,7 @@ const SignUpArtisan = () => {
                     id="phone"
                     name="phone"
                     type="tel"
+                    autoComplete="tel"
                     value={formData.phone}
                     onChange={handleChange}
                     placeholder="Your contact number"
@@ -280,7 +283,7 @@ const SignUpArtisan = () => {
                 <Link to="/privacy" className="text-orange-600 hover:text-orange-500">
                   Privacy Policy
                 </Link>, and{' '}
-                <Link to="/artisan-terms" className="text-orange-600 hover:text-orange-500">
+                <Link to="/terms" className="text-orange-600 hover:text-orange-500">
                   Artisan Guidelines
                 </Link>
               </Label>

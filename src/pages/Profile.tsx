@@ -10,90 +10,192 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { 
-  User, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  Calendar, 
-  Heart, 
-  ShoppingBag, 
-  Star,
+import {
+  Mail,
+  Phone,
+  MapPin,
+  Calendar,
+  Heart,
+  ShoppingBag,
   Edit,
   Save,
   Camera,
-  Loader2
+  Loader2,
+  X,
+  Lock,
+  ShieldCheck,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import { getImageUrl, api } from "@/lib/api";
+import { useState, useEffect, useRef } from "react";
+import { getImageUrl, api, imagesApi } from "@/lib/api";
+
+// ── Client-side image compression ────────────────────────────────────────────
+async function compressImage(file: File, maxSizePx = 512, quality = 0.80): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxSizePx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.webp'), {
+            type: 'image/webp', lastModified: Date.now()
+          }));
+        },
+        'image/webp',
+        quality,
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    img.src = objectUrl;
+  });
+}
 import { useAuth } from "@/contexts/AuthContext";
+import { ProfileCompletionBar } from "@/components/profile/ProfileCompletionBar";
+import { ProfilePreviewCard } from "@/components/profile/ProfilePreviewCard";
+import { SensitiveChangeModal } from "@/components/profile/SensitiveChangeModal";
+import type { SensitiveField } from "@/components/profile/SensitiveChangeModal";
+
+interface OrderItem {
+  product?: string;
+  name?: string;
+  quantity?: number;
+  price?: number;
+}
+
+interface Order {
+  id?: string;
+  _id?: string;
+  createdAt: string;
+  total?: number;
+  status: string;
+  items?: OrderItem[];
+}
+
+interface WishlistItem {
+  id?: string;
+  _id?: string;
+  productId?: {
+    _id?: string;
+    name?: string;
+    images?: string[];
+    price?: number;
+    artisan?: { name?: string };
+  };
+  name?: string;
+  image?: string;
+  artisan?: { name?: string };
+  price?: number;
+}
+
+// ── Validation helpers ───────────────────────────────────────────────────────
+const PHONE_RE  = /^[\d\s\-+().]{7,20}$/;
+const ZIP_RE    = /^[A-Za-z0-9\s-]{3,12}$/;
+
+type UserDataShape = {
+  name: string; email: string; phone: string;
+  street: string; city: string; state: string; zipCode: string; country: string;
+  bio: string; joinDate: string; avatar: string;
+};
+
+const BIO_KEY = (userId: string) => `profile_bio_${userId}`;
 
 const Profile = () => {
   const { user, updateUserProfile } = useAuth();
-  const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [userData, setUserData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    location: "",
-    bio: "",
-    joinDate: "",
-    avatar: ""
+
+  // ── Edit / save state ────────────────────────────────────────────────────
+  const [isEditing, setIsEditing]           = useState(false);
+  const [isSaving, setIsSaving]             = useState(false);
+  const [loading, setLoading]               = useState(true);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  // Draft data (mutated while editing; reverted on cancel)
+  const [userData, setUserData]             = useState<UserDataShape>({
+    name: "", email: "", phone: "", street: "", city: "", state: "",
+    zipCode: "", country: "India", bio: "", joinDate: "", avatar: ""
   });
+  // Snapshot of last-saved values — used to detect changes & enable cancel
+  const savedData                           = useRef<UserDataShape>(userData);
+  const avatarInputRef                      = useRef<HTMLInputElement>(null);
+  // Per-field validation errors
+  const [validationErrors, setValidationErrors] = useState<Partial<Record<keyof UserDataShape, string>>>({});
 
-  const [orders, setOrders] = useState<any[]>([]);
+  // ── Approval-flow state ──────────────────────────────────────────────────
+  const [showSensitiveModal, setShowSensitiveModal] = useState(false);
+  const pendingSavePayload = useRef<Parameters<typeof updateUserProfile>[0] | null>(null);
 
-  const [wishlist, setWishlist] = useState<any[]>([]);
-  const [stats, setStats] = useState({
-    totalOrders: 0,
-    totalSpent: 0,
-    wishlistItems: 0,
-    memberSince: ""
+  const [orders, setOrders]   = useState<Order[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [stats, setStats]     = useState({
+    totalOrders: 0, totalSpent: 0, wishlistItems: 0, memberSince: ""
   });
 
   useEffect(() => {
     if (user) {
       loadUserData();
     }
+    // loadUserData is stable per-user and defined below; disabling to avoid circular dep
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const loadUserData = async () => {
     setLoading(true);
     try {
-      // Load user data from context
-      setUserData({
-        name: user?.name || "",
-        email: user?.email || "",
-        phone: user?.phone || "",
-        location: user?.address ? `${user.address.city}, ${user.address.state}` : "",
-        bio: "Art enthusiast and collector of traditional crafts.",
-        joinDate: user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : "",
-        avatar: user?.avatar || ""
-      });
+      // Restore bio from localStorage (bio is not a backend field for regular users)
+      const storedBio = user?.id ? (localStorage.getItem(BIO_KEY(user.id)) ?? '') : '';
 
-      // Load orders and wishlist
+      const freshData: UserDataShape = {
+        name:     user?.name     || "",
+        email:    user?.email    || "",
+        phone:    user?.phone    || "",
+        street:   user?.address?.street  || "",
+        city:     user?.address?.city    || "",
+        state:    user?.address?.state   || "",
+        zipCode:  user?.address?.zipCode || "",
+        country:  user?.address?.country || "India",
+        bio:      storedBio || "",
+        joinDate: user?.createdAt
+          ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+          : "",
+        avatar:   user?.avatar || "",
+      };
+
+      setUserData(freshData);
+      savedData.current = freshData;
+
+      // Load orders and wishlist in parallel
       const [ordersData, wishlistData] = await Promise.all([
         api.getUserOrders().catch(() => ({ orders: [] })),
         api.getWishlist().catch(() => [])
       ]);
 
       setOrders(ordersData.orders || []);
-      // Ensure wishlistData is an array
-      const wishlistItems = Array.isArray(wishlistData)
-        ? wishlistData
-        : (wishlistData && Array.isArray((wishlistData as any).products)
-           ? (wishlistData as any).products
+      const wishlistData2 = wishlistData as { products?: WishlistItem[] };
+      const wishlistItems: WishlistItem[] = Array.isArray(wishlistData)
+        ? (wishlistData as WishlistItem[])
+        : (wishlistData2?.products && Array.isArray(wishlistData2.products)
+           ? wishlistData2.products
            : []);
       setWishlist(wishlistItems);
 
-      // Calculate stats
-      const totalSpent = (ordersData.orders || []).reduce((sum: number, order: any) => sum + (order.total || 0), 0);
+      const totalSpent = (ordersData.orders as Order[] || []).reduce(
+        (sum: number, order: Order) => sum + (order.total || 0), 0
+      );
       setStats({
-        totalOrders: ordersData.orders?.length || 0,
+        totalOrders:  ordersData.orders?.length || 0,
         totalSpent,
         wishlistItems: wishlistItems.length || 0,
-        memberSince: user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ""
+        memberSince:  user?.createdAt
+          ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+          : "",
       });
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -103,27 +205,120 @@ const Profile = () => {
     }
   };
 
-  const handleSave = async () => {
+  // ── Validation ────────────────────────────────────────────────────────────
+  const validate = (): boolean => {
+    const errs: Partial<Record<keyof UserDataShape, string>> = {};
+    if (!userData.name.trim())                                    errs.name    = 'Name is required';
+    if (userData.phone && !PHONE_RE.test(userData.phone))         errs.phone   = 'Enter a valid phone number';
+    if (userData.zipCode && !ZIP_RE.test(userData.zipCode))       errs.zipCode = 'Enter a valid ZIP / PIN';
+    setValidationErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  // ── Cancel edit ───────────────────────────────────────────────────────────
+  const handleCancel = () => {
+    setUserData(savedData.current);   // revert all draft changes
+    setValidationErrors({});
+    setIsEditing(false);
+  };
+
+  // ── Avatar / profile picture upload ─────────────────────────────────────
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';         // allow re-selecting the same file
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file (JPEG, PNG, WebP, etc.)');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image must be smaller than 10 MB');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
     try {
-      if (updateUserProfile) {
-        await updateUserProfile({
-          name: userData.name,
-          phone: userData.phone,
-          address: {
-            city: userData.location.split(',')[0]?.trim() || "",
-            state: userData.location.split(',')[1]?.trim() || "",
-            street: "",
-            zipCode: "",
-            country: "India"
-          }
-        });
+      // Compress to 512×512 WebP before uploading
+      const compressed = await compressImage(file, 512, 0.80);
+      const result = await imagesApi.upload(compressed);
+      // Server returns { success, image: { id, filename, url, ... } }
+      const avatarUrl: string = result?.image?.url || result?.image?.filename || result?.url || result?.filename;
+      if (!avatarUrl) throw new Error('No URL returned from upload');
+      await updateUserProfile({ avatar: avatarUrl });
+      setUserData(prev => ({ ...prev, avatar: avatarUrl }));
+      savedData.current = { ...savedData.current, avatar: avatarUrl };
+      toast.success('Profile picture updated!');
+    } catch (err) {
+      console.error('Avatar upload failed:', err);
+      toast.error('Failed to upload profile picture — please try again');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // ── Detect sensitive (phone) changes ─────────────────────────────────────
+  const getSensitiveChanges = () => {
+    const changes: { field: SensitiveField; oldValue: string; newValue: string }[] = [];
+    if (userData.phone.trim() !== savedData.current.phone.trim()) {
+      changes.push({ field: 'phone', oldValue: savedData.current.phone, newValue: userData.phone.trim() });
+    }
+    return changes;
+  };
+
+  // ── Core save ────────────────────────────────────────────────────────────
+  const doActualSave = async () => {
+    setIsSaving(true);
+    try {
+      const payload = {
+        name:    userData.name.trim(),
+        phone:   userData.phone.trim(),
+        address: {
+          street:  userData.street.trim(),
+          city:    userData.city.trim(),
+          state:   userData.state.trim(),
+          zipCode: userData.zipCode.trim(),
+          country: userData.country.trim() || 'India',
+        },
+      };
+
+      // Persist bio locally (not a backend field for Firebase users)
+      if (user?.id) {
+        localStorage.setItem(BIO_KEY(user.id), userData.bio.trim());
       }
+
+      await updateUserProfile(payload);
+
+      // Commit the saved snapshot
+      savedData.current = { ...userData };
+      setValidationErrors({});
       setIsEditing(false);
       toast.success('Profile updated successfully');
     } catch (error) {
       console.error('Profile update failed:', error);
-      toast.error('Failed to update profile');
+      toast.error('Failed to update profile — please try again');
+    } finally {
+      setIsSaving(false);
+      setShowSensitiveModal(false);
     }
+  };
+
+  // ── Handle save button click ──────────────────────────────────────────────
+  const handleSave = async () => {
+    if (!validate()) {
+      toast.error('Please fix the highlighted errors before saving');
+      return;
+    }
+
+    const sensitiveChanges = getSensitiveChanges();
+    if (sensitiveChanges.length > 0) {
+      // Show confirmation modal first
+      pendingSavePayload.current = null;   // signal to use current userData
+      setShowSensitiveModal(true);
+      return;
+    }
+
+    await doActualSave();
   };
 
   const getStatusBadge = (status: string) => {
@@ -178,23 +373,34 @@ const Profile = () => {
                     <CardTitle>Personal Information</CardTitle>
                     <CardDescription>Update your personal details</CardDescription>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-                  >
-                    {isEditing ? (
-                      <>
-                        <Save className="w-4 h-4 mr-2" />
-                        Save
-                      </>
-                    ) : (
-                      <>
-                        <Edit className="w-4 h-4 mr-2" />
-                        Edit
-                      </>
+                  <div className="flex items-center gap-2">
+                    {isEditing && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCancel}
+                        disabled={isSaving}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        Cancel
+                      </Button>
                     )}
-                  </Button>
+                    <Button
+                      variant={isEditing ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</>
+                      ) : isEditing ? (
+                        <><Save className="w-4 h-4 mr-2" />Save changes</>
+                      ) : (
+                        <><Edit className="w-4 h-4 mr-2" />Edit profile</>
+                      )}
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="flex items-center gap-6">
@@ -203,11 +409,32 @@ const Profile = () => {
                         <AvatarImage src={userData.avatar ? getImageUrl(userData.avatar) : getImageUrl('/assets/user-avatar.jpg')} />
                         <AvatarFallback>{userData.name.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}</AvatarFallback>
                       </Avatar>
-                      {isEditing && (
-                        <Button size="sm" variant="outline" className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full p-0" aria-label="Change profile picture">
-                          <Camera className="w-3 h-3" />
-                        </Button>
-                      )}
+                      {/* Hidden file input for avatar */}
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        id="profile-avatar-upload"
+                        name="avatar-upload"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="hidden"
+                        title="Upload profile picture"
+                        aria-label="Upload profile picture"
+                        autoComplete="off"
+                        onChange={handleAvatarUpload}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full p-0"
+                        aria-label="Change profile picture"
+                        disabled={isUploadingAvatar}
+                        onClick={() => avatarInputRef.current?.click()}
+                      >
+                        {isUploadingAvatar
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <Camera className="w-3 h-3" />}
+                      </Button>
                     </div>
                     <div>
                       <h3 className="font-semibold text-foreground">{userData.name}</h3>
@@ -217,44 +444,144 @@ const Profile = () => {
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-4">
+                    {/* Name */}
                     <div className="space-y-2">
                       <Label htmlFor="name">Full Name</Label>
-                      <Input 
-                        id="name" 
+                      <Input
+                        id="name"
+                        name="name"
+                        autoComplete="name"
                         value={userData.name}
                         disabled={!isEditing}
                         onChange={(e) => setUserData({...userData, name: e.target.value})}
+                        className={validationErrors.name ? 'border-destructive focus-visible:ring-destructive' : ''}
                       />
+                      {validationErrors.name && (
+                        <p className="flex items-center gap-1 text-xs text-destructive">
+                          <AlertCircle className="w-3 h-3" />{validationErrors.name}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Email — always read-only */}
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="flex items-center gap-1.5">
+                        Email
+                        <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                          <Lock className="w-3 h-3" />
+                          <span>Identity-verified</span>
+                        </span>
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          autoComplete="email"
+                          value={userData.email}
+                          disabled
+                          className="pr-8 bg-muted/50 cursor-not-allowed"
+                        />
+                        <ShieldCheck className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-green-600" />
+                      </div>
+                      <p className="text-xs text-muted-foreground">Email changes require identity verification. Contact support.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* Phone — sensitive field */}
+                    <div className="space-y-2">
+                      <Label htmlFor="phone" className="flex items-center gap-2">
+                        Phone Number
+                        {isEditing && userData.phone !== savedData.current.phone && (
+                          <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 bg-amber-50 gap-1">
+                            <AlertCircle className="w-3 h-3" />Sensitive — will confirm
+                          </Badge>
+                        )}
+                      </Label>
+                      <Input
+                        id="phone"
+                        name="phone"
+                        autoComplete="tel"
+                        value={userData.phone}
+                        disabled={!isEditing}
+                        onChange={(e) => setUserData({...userData, phone: e.target.value})}
+                        className={validationErrors.phone ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        placeholder="+91 98765 43210"
+                      />
+                      {validationErrors.phone && (
+                        <p className="flex items-center gap-1 text-xs text-destructive">
+                          <AlertCircle className="w-3 h-3" />{validationErrors.phone}
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="street">Street Address</Label>
                       <Input 
-                        id="email" 
-                        type="email"
-                        value={userData.email}
+                        id="street"
+                        name="street"
+                        autoComplete="address-line1"
+                        value={userData.street}
                         disabled={!isEditing}
-                        onChange={(e) => setUserData({...userData, email: e.target.value})}
+                        placeholder="123 Main St"
+                        onChange={(e) => setUserData({...userData, street: e.target.value})}
                       />
                     </div>
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="phone">Phone Number</Label>
+                      <Label htmlFor="city">City</Label>
                       <Input 
-                        id="phone" 
-                        value={userData.phone}
+                        id="city"
+                        name="city"
+                        autoComplete="address-level2"
+                        value={userData.city}
                         disabled={!isEditing}
-                        onChange={(e) => setUserData({...userData, phone: e.target.value})}
+                        onChange={(e) => setUserData({...userData, city: e.target.value})}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="location">Location</Label>
+                      <Label htmlFor="state">State</Label>
                       <Input 
-                        id="location" 
-                        value={userData.location}
+                        id="state"
+                        name="state"
+                        autoComplete="address-level1"
+                        value={userData.state}
                         disabled={!isEditing}
-                        onChange={(e) => setUserData({...userData, location: e.target.value})}
+                        onChange={(e) => setUserData({...userData, state: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="zipCode">ZIP / PIN Code</Label>
+                      <Input
+                        id="zipCode"
+                        name="zipCode"
+                        autoComplete="postal-code"
+                        value={userData.zipCode}
+                        disabled={!isEditing}
+                        onChange={(e) => setUserData({...userData, zipCode: e.target.value})}
+                        className={validationErrors.zipCode ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        placeholder="400 001"
+                      />
+                      {validationErrors.zipCode && (
+                        <p className="flex items-center gap-1 text-xs text-destructive">
+                          <AlertCircle className="w-3 h-3" />{validationErrors.zipCode}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="country">Country</Label>
+                      <Input 
+                        id="country"
+                        name="country"
+                        autoComplete="country-name"
+                        value={userData.country}
+                        disabled={!isEditing}
+                        onChange={(e) => setUserData({...userData, country: e.target.value})}
                       />
                     </div>
                   </div>
@@ -262,7 +589,9 @@ const Profile = () => {
                   <div className="space-y-2">
                     <Label htmlFor="bio">About Me</Label>
                     <Textarea 
-                      id="bio" 
+                      id="bio"
+                      name="bio"
+                      autoComplete="off"
                       value={userData.bio}
                       disabled={!isEditing}
                       onChange={(e) => setUserData({...userData, bio: e.target.value})}
@@ -272,54 +601,70 @@ const Profile = () => {
                 </CardContent>
               </Card>
 
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Account Stats</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Total Orders</span>
-                      <span className="font-semibold">{stats.totalOrders}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Total Spent</span>
-                      <span className="font-semibold">₹{stats.totalSpent.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Wishlist Items</span>
-                      <span className="font-semibold">{stats.wishlistItems}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Member Since</span>
-                      <span className="font-semibold">{stats.memberSince}</span>
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="space-y-4">
+                {/* ── Profile Completion ── */}
+                <ProfileCompletionBar
+                  data={userData}
+                  onEditClick={() => setIsEditing(true)}
+                />
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Contact Info</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex items-center gap-3 text-sm">
-                      <Mail className="w-4 h-4 text-muted-foreground" />
-                      <span>{userData.email}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <Phone className="w-4 h-4 text-muted-foreground" />
-                      <span>{userData.phone}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <MapPin className="w-4 h-4 text-muted-foreground" />
-                      <span>{userData.location}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <Calendar className="w-4 h-4 text-muted-foreground" />
-                      <span>Joined {userData.joinDate}</span>
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* ── Live Preview (visible only while editing) ── */}
+                {isEditing && (
+                  <ProfilePreviewCard
+                    data={{ ...userData, email: userData.email }}
+                    editing
+                  />
+                )}
+
+                {/* ── Account Stats ── */}
+                {!isEditing && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Account Stats</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {[
+                        ['Total Orders',  stats.totalOrders],
+                        ['Total Spent',   `₹${stats.totalSpent.toLocaleString()}`],
+                        ['Wishlist Items', stats.wishlistItems],
+                        ['Member Since',  stats.memberSince || '—'],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="flex justify-between items-center text-sm">
+                          <span className="text-muted-foreground">{label}</span>
+                          <span className="font-semibold">{value}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* ── Contact Info ── */}
+                {!isEditing && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Contact Info</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center gap-3 text-sm">
+                        <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span className="truncate">{userData.email}</span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                      </div>
+                      <div className="flex items-center gap-3 text-sm">
+                        <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span>{userData.phone || <em className="text-muted-foreground">Not set</em>}</span>
+                      </div>
+                      <div className="flex items-start gap-3 text-sm">
+                        <MapPin className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <span>{[userData.street, userData.city, userData.state, userData.zipCode].filter(Boolean).join(', ') || <em className="text-muted-foreground">No address set</em>}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm">
+                        <Calendar className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span>Joined {userData.joinDate || '—'}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             </div>
           </TabsContent>
@@ -343,7 +688,7 @@ const Profile = () => {
                       <p className="text-muted-foreground">Start shopping to see your orders here</p>
                     </div>
                   ) : (
-                    orders.map((order: any) => (
+                    orders.map((order: Order) => (
                       <div key={order.id || order._id} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted/50 transition-colors">
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-2">
@@ -390,7 +735,7 @@ const Profile = () => {
                       <p className="text-muted-foreground">Save items you love for later</p>
                     </div>
                   ) : (
-                    wishlist.map((item: any) => (
+                    wishlist.map((item: WishlistItem) => (
                       <Card key={item.productId?._id || item.id || item._id} className="overflow-hidden">
                         <div className="aspect-square bg-muted">
                           <img 
@@ -477,6 +822,15 @@ const Profile = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* ── Module 10: Sensitive-change approval modal ── */}
+      <SensitiveChangeModal
+        open={showSensitiveModal}
+        changes={getSensitiveChanges()}
+        saving={isSaving}
+        onConfirm={doActualSave}
+        onCancel={() => setShowSensitiveModal(false)}
+      />
 
       <Footer />
     </div>

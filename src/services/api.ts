@@ -94,7 +94,8 @@ export interface SellerFormData {
   upiId: string;
   paymentFrequency: string;
   story: string;
-  craftVideo: File | null;
+  /** URL of the already-uploaded video (empty string = not provided) */
+  craftVideo: string;
 }
 
 export const sellerApi = {
@@ -152,7 +153,8 @@ export const sellerApi = {
       productPhotos: formData.productPhotos ? await Promise.all(formData.productPhotos.map(f => fileToBase64(f))) : [],
       gstCertificate: formData.gstCertificate ? await fileToBase64(formData.gstCertificate) : null,
       aadhaarProof: formData.aadhaarProof ? await fileToBase64(formData.aadhaarProof) : null,
-      craftVideo: formData.craftVideo ? await fileToBase64(formData.craftVideo) : null
+      // craftVideo is already a URL from VideoUpload — send it directly, no base64 conversion
+      craftVideo: formData.craftVideo || null
     };
 
     const payloadSize = JSON.stringify(payload).length;
@@ -242,6 +244,15 @@ export const sellerApi = {
       body: JSON.stringify(finalData),
     });
 
+    return handleResponse(response);
+  },
+
+  // Check whether an email is already registered in either account type.
+  // Returns { existsAsCustomer, existsAsArtisan } booleans.
+  async checkEmail(email: string): Promise<{ existsAsCustomer: boolean; existsAsArtisan: boolean }> {
+    const response = await fetch(
+      `${API_BASE_URL}/auth/check-email?email=${encodeURIComponent(email)}`
+    );
     return handleResponse(response);
   },
 

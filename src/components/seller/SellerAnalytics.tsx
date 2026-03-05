@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -24,6 +24,17 @@ interface ProductAnalytics {
   sales: number;
   revenue: number;
   quantity: number;
+}
+
+/** Renders a single sales bar, setting --bar-width via a DOM ref to avoid inline styles. */
+function SalesBarItem({ pct }: { pct: number }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    barRef.current?.style.setProperty('--bar-width', `${pct}%`);
+  }, [pct]);
+  return (
+    <div ref={barRef} className="h-6 bg-gradient-to-r from-blue-500 to-blue-600 rounded bar-width-dynamic" />
+  );
 }
 
 export function SellerAnalytics() {
@@ -153,6 +164,7 @@ export function SellerAnalytics() {
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
+              aria-label="Select time period"
               className="px-3 py-1 border rounded text-sm"
             >
               <option value="7days">Last 7 Days</option>
@@ -168,11 +180,7 @@ export function SellerAnalytics() {
                 <div key={idx} className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground w-24">{item.date}</span>
                   <div className="flex-1 mx-4">
-                    <div className="h-6 bg-gradient-to-r from-blue-500 to-blue-600 rounded"
-                      style={{
-                        width: `${Math.max((item.sales / Math.max(...salesData.map(d => d.sales)) * 100), 5)}%`
-                      }}
-                    />
+                    <SalesBarItem pct={Math.max((item.sales / Math.max(...salesData.map(d => d.sales)) * 100), 5)} />
                   </div>
                   <div className="text-right w-24">
                     <p className="text-sm font-medium">₹{item.sales}</p>

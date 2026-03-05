@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Heart, Share2, Star, MapPin, Truck, Shield, RotateCcw, ArrowLeft, ShoppingCart, ShoppingBag, FileText, Settings, MessageSquare, Play, Ruler, Box, Pause, ZoomIn, ZoomOut, RotateCcw as ResetIcon, RotateCw } from "lucide-react";
 import { Navigation } from "@/components/Navigation";
@@ -8,28 +8,26 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-
-// Declare model-viewer custom element for TypeScript
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      'model-viewer': any;
-    }
-  }
-}
 import { useProduct } from "@/hooks/useProducts";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { getImageUrl } from "@/lib/api";
+import { getImageUrl, Product } from "@/lib/api";
 import { toast } from "sonner";
 import { analytics } from "@/lib/analytics";
-import { useEffect } from "react";
 import SocialShare from "@/components/SocialShare";
 import SEO from "@/components/SEO";
 import { ProductVideoPlayer } from "@/components/ProductVideoPlayer";
 import { MaterialCareGuide } from "@/components/MaterialCareGuide";
 import { parseVideoUrl } from "@/lib/videoUtils";
 import { VideoEmbed } from "@/components/VideoEmbed";
+
+const RATING_BARS = [
+  { pct: 'w-[82%]', count: 42 },
+  { pct: 'w-[65%]', count: 28 },
+  { pct: 'w-[38%]', count: 12 },
+  { pct: 'w-[20%]', count: 8 },
+  { pct: 'w-[10%]', count: 4 },
+];
 
 const ProductDetail = () => {
   const { id } = useParams();
@@ -38,13 +36,26 @@ const ProductDetail = () => {
   const [quantity, setQuantity] = useState(1);
   const [isAutoSpinning, setIsAutoSpinning] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [spinInterval, setSpinInterval] = useState<NodeJS.Timeout | null>(null);
+  const spinIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const mediaContainerRef = useRef<HTMLDivElement>(null);
+  const zoomImgRef = useRef<HTMLImageElement>(null);
+  // Set CSS custom properties for zoom via DOM ref — avoids inline style prop
+  useLayoutEffect(() => {
+    if (!zoomImgRef.current) return;
+    zoomImgRef.current.style.setProperty(
+      '--zoom-transform',
+      isHovering ? 'scale(2)' : `scale(${zoomLevel})`
+    );
+    zoomImgRef.current.style.setProperty(
+      '--zoom-origin',
+      isHovering ? `${mousePosition.x}% ${mousePosition.y}%` : 'center center'
+    );
+  }, [isHovering, mousePosition.x, mousePosition.y, zoomLevel]);
 
   // Mock product for Paytm testing
-  const mockProduct = useMemo(() => {
+  const mockProduct = useMemo<Product | null>(() => {
     if (id === 'mock-paytm-test-product') {
       return {
         id: "mock-paytm-test-product",
@@ -127,12 +138,12 @@ const ProductDetail = () => {
       const interval = setInterval(() => {
         setSelectedMediaIndex((prev) => (prev + 1) % combinedMedia.length);
       }, 2000); // Change media every 2 seconds
-      setSpinInterval(interval);
+      spinIntervalRef.current = interval;
       return () => clearInterval(interval);
     } else {
-      if (spinInterval) {
-        clearInterval(spinInterval);
-        setSpinInterval(null);
+      if (spinIntervalRef.current) {
+        clearInterval(spinIntervalRef.current);
+        spinIntervalRef.current = null;
       }
     }
   }, [isAutoSpinning, combinedMedia.length]);
@@ -140,15 +151,15 @@ const ProductDetail = () => {
   // Cleanup interval on unmount
   useEffect(() => {
     return () => {
-      if (spinInterval) {
-        clearInterval(spinInterval);
+      if (spinIntervalRef.current) {
+        clearInterval(spinIntervalRef.current);
       }
     };
-  }, [spinInterval]);
+  }, []);
 
   const handleAddToCart = async () => {
     // For mock products, skip cart and show success message
-    if (product.id === 'mock-paytm-test-product') {
+    if (product?.id === 'mock-paytm-test-product') {
       toast.success('Mock product added to cart (test mode)');
       return;
     }
@@ -179,7 +190,7 @@ const ProductDetail = () => {
 
   const handleBuyNow = async () => {
     // For mock products, go directly to checkout
-    if (product.id === 'mock-paytm-test-product') {
+    if (product?.id === 'mock-paytm-test-product') {
       navigate('/checkout', {
         state: {
           directPurchase: true,
@@ -369,13 +380,10 @@ const ProductDetail = () => {
                 />
               ) : (
                 <img
+                  ref={zoomImgRef}
                   src={getImageUrl(combinedMedia[selectedMediaIndex]?.url)}
                   alt={combinedMedia[selectedMediaIndex]?.alt}
-                  className="w-full h-full object-cover object-center transition-transform duration-300 ease-in-out"
-                  style={{
-                    transform: isHovering ? 'scale(2)' : `scale(${zoomLevel})`,
-                    transformOrigin: isHovering ? `${mousePosition.x}% ${mousePosition.y}%` : 'center center'
-                  }}
+                  className="w-full h-full object-cover object-center transition-transform duration-300 ease-in-out img-zoom-dynamic"
                 />
               )}
 
@@ -697,7 +705,7 @@ const ProductDetail = () => {
                 <span className="sm:hidden">Reviews</span>
               </TabsTrigger>
               {product.model3d && (
-                <TabsTrigger value="3dmodel" className="flex items-center gap-2 text-xs sm:text-sm px-2 sm:px-3 py-3 rounded-lg data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-purple-500/50 data-[state=active]:border-2 hover:bg-background/80 hover:text-foreground hover:shadow-sm hover:border-purple-500/30 transition-all duration-200 ease-in-out text-muted-foreground border border-purple-500/20">
+                <TabsTrigger value="3dmodel" className="flex items-center gap-2 text-xs sm:text-sm px-2 sm:px-3 py-3 rounded-lg data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border-2 data-[state=active]:border-purple-500/50 hover:bg-background/80 hover:text-foreground hover:shadow-sm hover:border-purple-500/30 transition-all duration-200 ease-in-out text-muted-foreground border border-purple-500/20">
                   <Box className="w-4 h-4 text-purple-500" />
                   <span className="hidden sm:inline">3D Model</span>
                   <span className="sm:hidden">3D</span>
@@ -790,18 +798,15 @@ const ProductDetail = () => {
                   </div>
                   
                   <div className="flex-1">
-                    {[5, 4, 3, 2, 1].map(rating => (
+                    {[5, 4, 3, 2, 1].map((rating, i) => (
                       <div key={rating} className="flex items-center gap-2 mb-1">
                         <span className="text-sm w-2">{rating}</span>
                         <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
                         <div className="flex-1 bg-muted rounded-full h-2">
-                          <div 
-                            className="bg-yellow-400 h-2 rounded-full" 
-                            style={{ width: `${Math.random() * 80 + 10}%` }}
-                          ></div>
+                          <div className={`bg-yellow-400 h-2 rounded-full ${RATING_BARS[i].pct}`}></div>
                         </div>
                         <span className="text-sm text-muted-foreground w-8">
-                          {Math.floor(Math.random() * 50 + 5)}
+                          {RATING_BARS[i].count}
                         </span>
                       </div>
                     ))}
@@ -890,8 +895,7 @@ const ProductDetail = () => {
                         auto-rotate
                         ar
                         ar-modes="webxr scene-viewer quick-look"
-                        style={{ width: '100%', height: '500px' }}
-                        class="model-viewer"
+                        class="model-viewer w-full h-[500px]"
                       >
                         <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 text-sm font-medium text-gray-700">
                           🖱️ Drag to rotate • 🔍 Scroll to zoom • 👆 Tap for AR

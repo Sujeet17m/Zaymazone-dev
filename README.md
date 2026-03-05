@@ -1,200 +1,251 @@
 # Zaymazone
 
-![Zaymazone Logo](public/logo.png)
-
-Zaymazone is a **modern artisan e-commerce platform** connecting buyers with local artisans, empowering creators to showcase and sell their handcrafted products online.  
-The project focuses on **cultural authenticity**, **user-friendly design**, and **seamless shopping and selling experiences**.
+> A modern artisan e-commerce platform connecting buyers with local artisans — empowering creators to showcase and sell their handcrafted products online.
 
 ---
 
-## 🌟 Features
+## Features
 
-### For Shoppers:
-- Browse **handcrafted collections** (pottery, textiles, toys, etc.)
-- **Filter & sort products** by category, price, material, and region
-- **View artisan profiles** with bios, stories, and product galleries
-- **Quick-view and hover previews** for products
-- Smooth **cart and checkout** flow with COD, UPI, and Razorpay support
+### For Shoppers
+- Browse handcrafted collections (pottery, textiles, toys, jewellery, leather, woodwork)
+- Filter & sort products by category, price, material, and region
+- View artisan profiles with bios, stories, and product galleries
+- Smooth cart and checkout flow with COD, UPI, and Razorpay support
+- Real-time order tracking and email notifications
 
-### For Artisans:
-- **Easy seller onboarding** with ID/bank verification
-- **Upload and manage products** from a personal dashboard
-- Track **sales, orders, reviews, and payments**
-- Personal **profile page** to share their story and products
+### For Artisans
+- Easy seller onboarding with ID and bank verification
+- Upload and manage products from a personal dashboard
+- Real-time sales analytics, revenue charts, and KPI metrics
+- Accept or reject individual orders with mandatory reason logging
+- Automatic invoice generation for every transaction
 
-### General:
-- Fully **responsive design** for desktop and mobile
-- **Search with filters & suggestions**
-- **Social sharing** and SEO-friendly pages
-- Optimized for **speed and accessibility (WCAG 2.1)**
-
----
-
-## 🖼️ Branding
-
-The logo represents **diversity and creativity** through three shapes:
-- **Square** – stability and craftsmanship
-- **Circle** – unity and community
-- **Triangle** – growth and aspiration
-
-Colors:  
-- **Terracotta** – warmth and earthiness  
-- **Forest Green** – trust and nature  
-- **Beige** – simplicity and balance  
+### For Admins
+- Artisan approval workflow
+- Full user/order/product management panel
+- Platform-wide statistics
 
 ---
 
-## 📂 Project Structure
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 + TypeScript, Vite, Tailwind CSS, Shadcn/UI |
+| Backend | Node.js + Express, ES Modules |
+| Database | MongoDB (Mongoose ODM) |
+| Auth | Firebase Authentication |
+| Payments | Razorpay, UPI, COD |
+| Testing | Vitest, @testing-library/react, supertest |
+| Deployment | Vercel (frontend) + Render (backend) |
+
+---
+
+## Project Structure
 
 ```
-
-Zaymazone/
-│
-├── public/               # Static assets (logo, images, favicon)
-├── src/
-│   ├── components/       # Reusable UI components (buttons, cards, etc.)
-│   ├── pages/            # Page-level components (Home, Shop, Product, etc.)
-│   ├── layouts/          # Shared layouts and navigation
-│   ├── hooks/            # Custom React hooks
-│   ├── services/         # API calls and data handling
-│   └── styles/           # Global and modular styles (CSS/SASS)
-│
-├── package.json
-├── README.md
-└── .gitignore
-
-````
+Zaymazone-dev/
+├── src/                      # React frontend
+│   ├── components/artisan/   # Artisan dashboard UI components
+│   ├── contexts/             # AuthContext (Firebase)
+│   ├── lib/api.ts            # Typed HTTP client for all endpoints
+│   ├── pages/                # Route-level pages
+│   └── __tests__/            # Frontend test suite (45 tests)
+├── server/
+│   └── src/
+│       ├── middleware/       # Firebase token verification, role guards
+│       ├── models/           # Mongoose schemas (Order, Invoice, Artisan, …)
+│       ├── routes/           # Express routers
+│       ├── services/         # Business logic (dashboard, invoices, shipping)
+│       └── __tests__/        # Backend test suite (71 tests)
+├── docs/
+│   ├── API_REFERENCE.md      # Full endpoint reference
+│   ├── ARCHITECTURE.md       # System architecture & module map
+│   └── PAYMENT_MODULE.md     # Razorpay / UPI integration guide
+└── supabase/                 # Supabase config (image storage)
+```
 
 ---
 
-## 🚀 Getting Started
+## Modules
+
+| # | Module | Key Files |
+|---|--------|-----------|
+| 1 | Auth & Artisan Onboarding | `routes/auth.js`, `routes/artisans.js` |
+| 2 | Artisan Dashboard & Analytics | `services/artisanDashboardService.js`, `routes/seller.js` |
+| 3 | Automatic Invoice Generation | `services/invoiceService.js` |
+| 4 | Seller Order Accept/Reject | `routes/seller.js` (POST `/orders/:id/accept|reject`) |
+| 5 | Product Management | `routes/products.js` |
+| 6 | Buyer Orders | `routes/orders.js` |
+| 7 | Dashboard UI | `src/components/artisan/` |
+| 8 | Payments | `routes/payments.js`, `services/paymentService.js` |
+| 9 | Shipping | `services/shippingService.js` |
+| 10 | Admin Panel | `routes/admin.js` |
+| 11 | Testing & Documentation | `server/src/__tests__/`, `src/__tests__/`, `docs/` |
+
+---
+
+## Getting Started
 
 ### Prerequisites
-- Node.js (v16+)
-- npm or yarn
-- Git
+- Node.js v18+
+- MongoDB (local or Atlas)
+- Firebase project with service account key
+- npm v9+
 
-### Installation
+### 1 — Clone and install
+
 ```bash
-# Clone the repository
 git clone https://github.com/yourusername/zaymazone.git
-
-# Navigate into the project
 cd zaymazone
 
-# Install dependencies
+# Install frontend dependencies
 npm install
-# or
-yarn install
-````
 
-### Running Locally
-
-```bash
-# Start the development server
-npm start
-# or
-yarn start
+# Install backend dependencies
+cd server && npm install && cd ..
 ```
 
-Visit `http://localhost:3000` in your browser.
+### 2 — Environment variables
 
-### Build for Production
+Create `server/.env`:
 
-```bash
-npm run build
-# or
-yarn build
+```env
+PORT=4000
+MONGODB_URI=mongodb://127.0.0.1:27017/zaymazone
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxx@your-project.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+CORS_ORIGIN=http://localhost:8080
+RESEND_API_KEY=re_xxxx           # optional: email notifications
 ```
 
----
+Create `.env` (frontend):
 
-## 🛠️ Tech Stack
+```env
+VITE_API_URL=http://localhost:4000
+VITE_FIREBASE_API_KEY=AIzaSy...
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+```
 
-* **Frontend**: React, TypeScript (optional), Tailwind CSS / SCSS
-* **State Management**: Redux Toolkit or Context API
-* **Backend (Optional)**: Node.js + Express (or Firebase for serverless)
-* **Database (Optional)**: MongoDB or PostgreSQL
-* **Payments**: Razorpay, UPI, COD
-* **Deployment**: Vercel / Netlify (frontend), Render / AWS (backend)
+### 3 — Start development servers
 
----
+```bash
+# Terminal 1 — Backend API
+cd server && npm run dev
 
-## 📌 Roadmap
+# Terminal 2 — Frontend
+npm run dev
+```
 
-1. **Phase 1**: UI & Frontend Development
-2. **Phase 2**: Backend APIs (authentication, product, artisan management)
-3. **Phase 3**: Payment gateway integration
-4. **Phase 4**: Performance optimizations and SEO
-
----
-## Security Hardening
-
-Client-side measures added:
-- HTTPS enforcement in production via `enforceHttpsInProduction()` in `src/lib/security.ts`.
-- Input validation and sanitization using Zod schemas and `sanitizeObject()` for auth and forms.
-- Basic client-side rate limiting for sensitive actions (`ClientRateLimiter`).
-- Optional client-side request logging using `logEvent()` with `VITE_LOG_ENDPOINT`.
-- Dev CORS tightened in `vite.config.ts` to localhost origins only.
-
-Server-side requirements (implement on your API/backend):
-- Rate limiting: Apply IP/user-based throttling (e.g., 5/min for auth) using Redis token bucket or sliding window.
-- Input validation: Re-validate all inputs server-side with the same schemas.
-- CORS: Restrict `Access-Control-Allow-Origin` to your production domains, disallow `*` with credentials.
-- Password hashing: Use bcrypt (work factor 10-12) or Argon2. Never store plaintext passwords.
-- HTTPS: Terminate TLS at CDN/load balancer and redirect HTTP→HTTPS.
-- API keys: Store in a secrets manager, rotate at least quarterly. Support overlapping validity during rotation.
-- Logging/monitoring: Centralize request logs (status, latency, user/IP), add alerting for spikes and auth failures.
-
-Environment variables:
-- `VITE_LOG_ENDPOINT` (optional) — endpoint that accepts JSON logs via Beacon.
-- `VITE_API_URL` — backend API base URL (e.g., `http://localhost:4000`).
-
-## Backend API (Express + MongoDB)
-
-Run locally:
-- Install deps: `npm install --prefix server`
-- Create `server/.env` (see variables below)
-- Start API: `npm run dev --prefix server` (default `http://localhost:4000`)
-
-Env vars (`server/.env`):
-- `PORT=4000`
-- `MONGODB_URI=mongodb://127.0.0.1:27017/zaymazone`
-- `JWT_SECRET=change-me`
-- `CORS_ORIGIN=http://localhost:8080`
-
-Endpoints:
-- Auth: `POST /api/auth/signup`, `POST /api/auth/signin`
-- Products: `GET /api/products`, `GET /api/products/:id`, `POST|PUT|DELETE` (auth required)
-- Artisans: `GET /api/artisans`, `GET /api/artisans/:id`, `POST|PUT|DELETE` (auth required)
-- Orders: `GET /api/orders/my-orders`, `GET /api/orders/:id`, `POST /api/orders`, `PATCH /api/orders/:id/cancel`
-- Payments: `POST /api/payments/create-order`, `POST /api/payments/verify`, `GET /api/payments/order/:orderId/status`
-- Images: `POST /api/images/upload` (auth required)
-- Firebase Auth: `POST /api/firebase-auth/sync`, `PATCH /api/firebase-auth/profile`
-
-Notes:
-- Server applies Helmet, CORS, rate limiting, and logging.
-- Ensure MongoDB is running locally or update `MONGODB_URI`.
-- For production, set `VITE_API_URL=https://zaymazone-backend.onrender.com` in `.env`.
-
-### Real-Time Dashboard Integration
-
-The dashboard (`/dashboard`) now connects to the live backend API for real-time data:
-- **Profile Management**: Edit name, phone, address, and upload avatar via `PATCH /api/firebase-auth/profile`.
-- **Orders**: View orders with polling every 30s; cancel orders; initiate payments.
-- **Payments**: "Pay Now" redirects to Zoho payment URL; payment status updates in real-time.
-- **Order Details Modal**: Shows full order info with payment status polling every 10s.
-
-Environment Variables:
-- `VITE_API_URL=https://zaymazone-backend.onrender.com/` (production backend)
+Frontend: `http://localhost:8080`  
+Backend API: `http://localhost:4000`
 
 ---
 
-## 🤝 Contributing
+## API Reference
 
-Contributions are welcome!
+See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for the full endpoint reference.
+
+Quick overview:
+
+| Base Path | Description |
+|-----------|-------------|
+| `/api/auth` | Registration and sign-in |
+| `/api/artisans` | Artisan profiles |
+| `/api/seller/dashboard` | **Module 2** — analytics bundle |
+| `/api/seller/orders/:id/accept` | **Module 4** — accept order |
+| `/api/seller/orders/:id/reject` | **Module 4** — reject order |
+| `/api/invoices/:orderId` | **Module 3** — invoice lookup |
+| `/api/products` | Product catalogue |
+| `/api/orders` | Buyer orders |
+| `/api/payments` | Payment flow |
+| `/api/admin` | Admin operations |
+
+---
+
+## Testing
+
+The project has **116 tests** in total across backend and frontend.
+
+```bash
+# Run backend tests (71 tests)
+cd server && npm test
+
+# Run frontend tests (45 tests)
+npm test
+
+# Run with coverage
+cd server && npm run test:coverage
+npm run test:coverage
+```
+
+### Test files
+
+**Backend** (`server/src/__tests__/`):
+- `edge-cases.test.js` — 36 pure unit tests (helpers, validation, formatters)
+- `services/artisanDashboardService.test.js` — 12 tests
+- `services/invoiceService.test.js` — 10 tests
+- `routes/seller.routes.test.js` — 13 integration tests (supertest)
+
+**Frontend** (`src/__tests__/`):
+- `api.helpers.test.ts` — 23 tests
+- `components/AcceptOrderModal.test.tsx` — 7 tests
+- `components/RejectionReasonModal.test.tsx` — 9 tests
+- `components/DashboardStatsRow.test.tsx` — 6 tests
+
+---
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for:
+- Full system diagram
+- Data model summaries
+- Analytics aggregation pipeline design
+- Invoice idempotency pattern
+- Firebase auth flow
+
+---
+
+## Deployment
+
+### Frontend (Vercel)
+
+The `vercel.json` at the root is pre-configured. Set environment variables in the Vercel dashboard.
+
+### Backend (Render / Railway)
+
+1. Set all `server/.env` variables as environment secrets
+2. Build command: `npm install`
+3. Start command: `node src/index.js`
+
+---
+
+## Security
+
+- **HTTPS** enforced in production
+- **Firebase ID tokens** verified server-side on every protected request
+- **Helmet** headers on all API responses
+- **Zod** input validation on all route handlers
+- **Rate limiting** via `express-rate-limit`
+- **CORS** restricted to configured origins
+
+---
+
+## Contributing
 
 1. Fork the repository
-2. Create a new branch (`feature/new-feature`)
+2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Commit changes and push
-4. Submit a Pull Request
+4. Open a Pull Request against `main`
+
+Please ensure `npm test` passes in both root and `server/` before submitting.
+
+---
+
+## Branding
+
+Colors: **Terracotta** (warmth) · **Forest Green** (trust) · **Beige** (simplicity)
+
+Logo shapes: **Square** (craftsmanship) · **Circle** (community) · **Triangle** (growth)

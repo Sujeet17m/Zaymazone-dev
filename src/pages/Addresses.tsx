@@ -208,6 +208,8 @@ const Addresses = () => {
                     <Label htmlFor="name">Full Name</Label>
                     <Input
                       id="name"
+                      name="name"
+                      autoComplete="name"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       required
@@ -219,7 +221,9 @@ const Addresses = () => {
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input
                     id="phone"
+                    name="phone"
                     type="tel"
+                    autoComplete="tel"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     required
@@ -230,6 +234,8 @@ const Addresses = () => {
                   <Label htmlFor="street">Street Address</Label>
                   <Textarea
                     id="street"
+                    name="street"
+                    autoComplete="street-address"
                     value={formData.street}
                     onChange={(e) => setFormData({ ...formData, street: e.target.value })}
                     required
@@ -241,6 +247,8 @@ const Addresses = () => {
                     <Label htmlFor="city">City</Label>
                     <Input
                       id="city"
+                      name="city"
+                      autoComplete="address-level2"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       required
@@ -249,8 +257,8 @@ const Addresses = () => {
                   <div>
                     <Label htmlFor="state">State</Label>
                     <Input
-                      id="state"
-                      value={formData.state}
+                      id="state"                    name="state"
+                    autoComplete="address-level1"                      value={formData.state}
                       onChange={(e) => setFormData({ ...formData, state: e.target.value })}
                       required
                     />
@@ -261,8 +269,8 @@ const Addresses = () => {
                   <div>
                     <Label htmlFor="zipCode">ZIP Code</Label>
                     <Input
-                      id="zipCode"
-                      value={formData.zipCode}
+                      id="zipCode"                    name="zipCode"
+                    autoComplete="postal-code"                      value={formData.zipCode}
                       onChange={(e) => setFormData({ ...formData, zipCode: e.target.value })}
                       required
                     />
@@ -270,8 +278,8 @@ const Addresses = () => {
                   <div>
                     <Label htmlFor="country">Country</Label>
                     <Input
-                      id="country"
-                      value={formData.country}
+                      id="country"                    name="country"
+                    autoComplete="country-name"                      value={formData.country}
                       onChange={(e) => setFormData({ ...formData, country: e.target.value })}
                       required
                     />

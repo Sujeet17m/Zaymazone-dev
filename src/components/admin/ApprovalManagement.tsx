@@ -117,7 +117,7 @@ export function ApprovalManagement() {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-semibold text-lg">{product.name}</h3>
-                <p className="text-sm text-muted-foreground">by {product.artisan?.name || 'Unknown Artisan'}</p>
+                <p className="text-sm text-muted-foreground">by {product.artisanId?.name || product.artisan?.name || 'Unknown Artisan'}</p>
                 <Badge variant="outline" className="mt-1">{product.category}</Badge>
               </div>
               <div className="text-right">
@@ -145,7 +145,7 @@ export function ApprovalManagement() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-sm font-medium">Artisan</label>
-                        <p>{product.artisan?.name || 'Unknown'}</p>
+                        <p>{product.artisanId?.name || product.artisan?.name || 'Unknown'}</p>
                       </div>
                       <div>
                         <label className="text-sm font-medium">Category</label>

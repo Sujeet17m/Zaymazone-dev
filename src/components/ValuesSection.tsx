@@ -33,8 +33,7 @@ export const ValuesSection = () => {
           {values.map((value, index) => (
             <div
               key={value.title}
-              className="value-card animate-scale-in"
-              style={{ animationDelay: `${index * 0.1}s` }}
+              className={`value-card animate-scale-in ${ ['[animation-delay:0s]','[animation-delay:0.1s]','[animation-delay:0.2s]','[animation-delay:0.3s]'][index] ?? '' }`}
             >
               <div className="flex justify-center mb-6">
                 <div className="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-soft">

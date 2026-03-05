@@ -1,6 +1,8 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { verifyFirebaseToken } from '../lib/firebase-admin.js';
 import User from '../models/User.js';
+import Artisan from '../models/Artisan.js';
 import { authenticateToken } from '../middleware/firebase-auth.js';
 
 const router = express.Router();
@@ -30,7 +32,11 @@ router.post('/sync', async (req, res) => {
       user.avatar = firebaseUser.picture || user.avatar;
       user.isEmailVerified = firebaseUser.emailVerified;
       user.lastLogin = new Date();
-      
+      // Always honour the role passed by the caller so that a customer who
+      // re-registers via SignUpArtisan is promoted to 'artisan' immediately.
+      if (role && role !== 'user') {
+        user.role = role;
+      }
       await user.save();
     } else {
       // Create new user
@@ -48,6 +54,29 @@ router.post('/sync', async (req, res) => {
       await user.save();
     }
     
+    // Auto-create a minimal Artisan profile the first time an artisan signs up/in via Firebase
+    if (user.role === 'artisan') {
+      const existing = await Artisan.findOne({ userId: user._id })
+      if (!existing) {
+        try {
+          await Artisan.create({
+            userId:          user._id,
+            name:            user.name,
+            email:           user.email,
+            location:        { city: 'India', state: 'India', country: 'India' },
+            approvalStatus:  'pending',
+            isActive:        true,
+          })
+          console.log('[firebase-auth/sync] Auto-created Artisan stub for', user.email)
+        } catch (artisanErr) {
+          // Duplicate key = artisan already exists by a parallel request — safe to ignore
+          if (artisanErr.code !== 11000) {
+            console.error('[firebase-auth/sync] Failed to auto-create Artisan stub:', artisanErr.message)
+          }
+        }
+      }
+    }
+
     // Return user data (without sensitive fields)
     const userResponse = {
       id: user._id,
@@ -56,15 +85,27 @@ router.post('/sync', async (req, res) => {
       email: user.email,
       role: user.role,
       avatar: user.avatar,
+      phone: user.phone,
+      address: user.address,
       isEmailVerified: user.isEmailVerified,
       authProvider: user.authProvider,
       preferences: user.preferences,
+      lastLogin: user.lastLogin,
       createdAt: user.createdAt
     };
     
+    // Issue a backend JWT so the client can authenticate protected API routes
+    // without relying on Firebase Admin token verification on every request.
+    const accessToken = jwt.sign(
+      { sub: user._id.toString(), email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: '7d' }
+    );
+
     res.json({
       message: 'User synced successfully',
-      user: userResponse
+      user: userResponse,
+      accessToken
     });
     
   } catch (error) {
@@ -113,7 +154,7 @@ router.get('/me', authenticateToken, async (req, res) => {
  */
 router.patch('/profile', authenticateToken, async (req, res) => {
   try {
-    const { name, phone, address, preferences } = req.body;
+    const { name, phone, address, preferences, avatar } = req.body;
     const user = req.user;
     
     // Update allowed fields
@@ -121,6 +162,7 @@ router.patch('/profile', authenticateToken, async (req, res) => {
     if (phone !== undefined) user.phone = phone;
     if (address !== undefined) user.address = { ...user.address, ...address };
     if (preferences !== undefined) user.preferences = { ...user.preferences, ...preferences };
+    if (avatar !== undefined) user.avatar = avatar;
     
     await user.save();
     

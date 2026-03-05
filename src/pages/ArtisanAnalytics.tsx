@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Navigation } from '@/components/Navigation';
 import { Footer } from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
@@ -41,20 +41,16 @@ const ArtisanAnalytics = () => {
     ordersByStatus: Array<{ _id: string; count: number }>;
     monthlyRevenue: Array<{ _id: { year: number; month: number }; revenue: number; orders: number }>;
     topProducts: Array<{ _id: string; name: string; totalSold: number; revenue: number }>;
-    dailyRevenue: Array<{ _id: string; revenue: number; orders: number }>;
-    dateRange: { startDate: string | null; endDate: string | null };
+    dailyRevenue?: Array<{ _id: string; revenue: number; orders: number }>;
+    dateRange?: { startDate: string | null; endDate: string | null };
   } | null>(null);
 
-  const loadAnalytics = async (silent = false) => {
+  const loadAnalytics = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     if (silent) setRefreshing(true);
 
     try {
-      const params: { startDate?: string; endDate?: string } = {};
-      if (dateRange?.from) params.startDate = dateRange.from.toISOString();
-      if (dateRange?.to) params.endDate = dateRange.to.toISOString();
-
-      const analyticsData = await api.getArtisanAnalytics(params);
+      const analyticsData = await api.getArtisanAnalytics();
       setAnalytics(analyticsData);
     } catch (error) {
       console.error('Failed to load analytics:', error);
@@ -69,13 +65,13 @@ const ArtisanAnalytics = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     if (user) {
       loadAnalytics();
     }
-  }, [user, dateRange]);
+  }, [user, dateRange, loadAnalytics]);
 
   const handleRefresh = () => {
     loadAnalytics();
@@ -196,7 +192,7 @@ const ArtisanAnalytics = () => {
                   <Calendar
                     initialFocus
                     mode="range"
-                    defaultMonth={dateRange.from}
+                    defaultMonth={dateRange?.from}
                     selected={dateRange}
                     onSelect={(range) => setDateRange(range?.from ? range as { from: Date; to?: Date } : undefined)}
                     numberOfMonths={2}

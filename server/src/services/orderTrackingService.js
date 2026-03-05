@@ -1,5 +1,6 @@
 import Order from '../models/Order.js';
 import User from '../models/User.js';
+import codService from './codService.js';
 
 /**
  * Order tracking service for managing order status updates,
@@ -16,7 +17,7 @@ class OrderTrackingService {
   async updateOrderStatus(orderId, newStatus, updateData = {}) {
     try {
       const order = await Order.findById(orderId).populate('userId', 'name email');
-      
+
       if (!order) {
         throw new Error('Order not found');
       }
@@ -336,6 +337,83 @@ class OrderTrackingService {
       return result;
     } catch (error) {
       console.error('Error getting order analytics:', error);
+      throw error;
+    }
+  }
+  /**
+   * Update COD order status with COD-specific lifecycle validation.
+   * Handles cash collection on delivery and risk re-assessment on return.
+   *
+   * @param {string} orderId - Order ID
+   * @param {string} newStatus - New status
+   * @param {Object} updateData - Additional update data (note, trackingNumber, etc.)
+   * @returns {Promise<Object>} Updated order
+   */
+  async updateCodOrderStatus(orderId, newStatus, updateData = {}) {
+    try {
+      const order = await Order.findOne({ _id: orderId, paymentMethod: 'cod' })
+        .populate('userId', 'name email');
+
+      if (!order) {
+        throw new Error('COD order not found');
+      }
+
+      // Use COD-specific transition validation
+      if (!codService.isValidCodStatusTransition(order.status, newStatus)) {
+        throw new Error(`Invalid COD status transition from '${order.status}' to '${newStatus}'`);
+      }
+
+      // Apply status
+      order.status = newStatus;
+      order.statusHistory.push({
+        status: newStatus,
+        timestamp: new Date(),
+        note: updateData.note || `COD order status updated to ${newStatus}`
+      });
+
+      if (newStatus === 'shipped' && updateData.trackingNumber) {
+        order.trackingNumber = updateData.trackingNumber;
+        order.courierService = updateData.courierService || order.courierService;
+        order.shippedAt = new Date();
+      }
+
+      if (newStatus === 'delivered') {
+        order.deliveredAt = new Date();
+        order.actualDelivery = new Date();
+        order.codCollectedAt = new Date();  // Cash collected at doorstep
+        order.paymentStatus = 'paid';       // COD payment fulfilled
+        order.paidAt = new Date();
+      }
+
+      if (newStatus === 'cancelled') {
+        order.cancelledAt = new Date();
+        order.cancellationReason = updateData.reason || 'Order cancelled';
+      }
+
+      if (newStatus === 'returned') {
+        // Re-assess risk after return event
+        const risk = await codService.handleReturnRiskUpdate(
+          order.userId._id.toString(),
+          order._id.toString()
+        );
+        order.codRiskFlags = {
+          ...order.codRiskFlags,
+          isFlagged: risk.isFlagged,
+          isHighRisk: risk.isHighRisk,
+          flagReason: risk.flagReason,
+          returnCount: risk.returnCount,
+          ...(risk.isFlagged ? { flaggedAt: new Date() } : {})
+        };
+      }
+
+      await order.save();
+
+      // Send notification
+      await this.sendOrderNotification(order, newStatus, updateData);
+
+      return order;
+    } catch (error) {
+      console.error('Error updating COD order status:', error);
       throw error;
     }
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,13 @@ interface Product {
   salesCount?: number; // Changed from totalSales to match database
   viewCount?: number; // Changed from views to match database
   isFeatured?: boolean; // Changed from featured to match database
+  materials?: string[];
+  dimensions?: string;
+  weight?: string;
+  colors?: string[];
+  tags?: string[];
+  isHandmade?: boolean;
+  shippingTime?: string;
 }
 
 interface Artisan {
@@ -87,6 +94,29 @@ interface Artisan {
   };
   isActive: boolean;
   joinedDate: Date;
+}
+
+interface RawApiProduct {
+  artisanId?: { _id?: string; name?: string } | string;
+  [key: string]: unknown;
+}
+
+interface RawApiArtisan {
+  id?: string;
+  _id?: string;
+  name: string;
+  description?: string;
+  bio?: string;
+  location?: string;
+  avatar?: string;
+  image?: string;
+  specialty?: string;
+  experience?: string | number;
+  rating?: number;
+  reviews?: number;
+  products?: number;
+  productCount?: number;
+  [key: string]: unknown;
 }
 
 export function ProductManagement() {
@@ -159,12 +189,7 @@ export function ProductManagement() {
   });
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadProducts();
-    loadArtisans();
-  }, []);
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     try {
       setLoading(true);
       const [approvedResponse, pendingResponse] = await Promise.all([
@@ -173,24 +198,24 @@ export function ProductManagement() {
       ]);
 
       // Transform products to match frontend interface
-      const transformedProducts = (approvedResponse.products || []).map((product: any) => ({
+      const transformedProducts = (approvedResponse.products || []).map((product: RawApiProduct) => ({
         ...product,
         artisan: product.artisanId ? {
-          _id: product.artisanId._id || product.artisanId,
-          name: product.artisanId.name || 'Unknown'
+          _id: (product.artisanId as { _id?: string; name?: string })._id || String(product.artisanId),
+          name: (product.artisanId as { _id?: string; name?: string }).name || 'Unknown'
         } : undefined
       }));
 
-      const transformedPendingProducts = (pendingResponse.products || []).map((product: any) => ({
+      const transformedPendingProducts = (pendingResponse.products || []).map((product: RawApiProduct) => ({
         ...product,
         artisan: product.artisanId ? {
-          _id: product.artisanId._id || product.artisanId,
-          name: product.artisanId.name || 'Unknown'
+          _id: (product.artisanId as { _id?: string; name?: string })._id || String(product.artisanId),
+          name: (product.artisanId as { _id?: string; name?: string }).name || 'Unknown'
         } : undefined
       }));
 
-      setProducts(transformedProducts);
-      setPendingProducts(transformedPendingProducts);
+      setProducts(transformedProducts as Product[]);
+      setPendingProducts(transformedPendingProducts as Product[]);
     } catch (error) {
       console.error('Error loading products:', error);
       toast({
@@ -201,9 +226,9 @@ export function ProductManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
-  const loadArtisans = async () => {
+  const loadArtisans = useCallback(async () => {
     try {
       const response = await adminService.getArtisans();
       setArtisans(response.artisans || []);
@@ -212,10 +237,10 @@ export function ProductManagement() {
       // Try fallback: get artisans from public API
       try {
         const { api } = await import('@/lib/api');
-        const publicResponse = await api.getArtisans();
+        const publicResponse = await api.getArtisans() as unknown as RawApiArtisan[];
         // Transform public artisans to match our interface
-        const transformedArtisans = publicResponse.map((artisan: any) => ({
-          _id: artisan.id || artisan._id,
+        const transformedArtisans = publicResponse.map((artisan) => ({
+          _id: artisan.id || artisan._id || '',
           name: artisan.name,
           bio: artisan.description || artisan.bio || '',
           location: {
@@ -226,7 +251,7 @@ export function ProductManagement() {
           avatar: artisan.avatar || artisan.image || '',
           coverImage: artisan.image || '',
           specialties: [artisan.specialty || 'Artisan'],
-          experience: parseInt(artisan.experience) || 0,
+          experience: parseInt(String(artisan.experience)) || 0,
           rating: artisan.rating || 0,
           totalRatings: artisan.reviews || 0,
           totalProducts: artisan.products || artisan.productCount || 0,
@@ -238,7 +263,7 @@ export function ProductManagement() {
           isActive: true,
           joinedDate: new Date()
         }));
-        setArtisans(transformedArtisans);
+        setArtisans(transformedArtisans as Artisan[]);
       } catch (fallbackError) {
         console.error('Fallback artisan loading also failed:', fallbackError);
         toast({
@@ -248,7 +273,12 @@ export function ProductManagement() {
         });
       }
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadProducts();
+    loadArtisans();
+  }, [loadProducts, loadArtisans]);
 
   const handleApprove = async (productId: string) => {
     try {
@@ -359,19 +389,11 @@ export function ProductManagement() {
   };
 
   const handleEditProduct = async () => {
-    console.log('handleEditProduct called', { editingProduct, editFormData });
-
     if (!editingProduct) {
-      console.log('No editing product');
       return;
     }
 
     if (!editFormData.name || !editFormData.price || !editFormData.category) {
-      console.log('Validation failed', {
-        name: editFormData.name,
-        price: editFormData.price,
-        category: editFormData.category
-      });
       toast({
         title: "Validation Error",
         description: "Please fill name, price, and category fields",
@@ -403,8 +425,6 @@ export function ProductManagement() {
         videos: editFormData.videos
       };
 
-      console.log('Sending product data:', productData);
-
       await adminService.updateProduct(editingProduct._id, productData);
       toast({
         title: "Success",
@@ -428,19 +448,6 @@ export function ProductManagement() {
   };
 
   const openEditDialog = (product: Product) => {
-    console.log('openEditDialog called with product:', product);
-    console.log('Product properties:', {
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      priceType: typeof product.price,
-      originalPrice: product.originalPrice,
-      stock: product.stock, // Changed from stockCount
-      category: product.category,
-      artisan: product.artisan,
-      images: product.images
-    });
-
     setEditingProduct(product);
     setEditFormData({
       name: product.name || '',
@@ -449,24 +456,18 @@ export function ProductManagement() {
       originalPrice: (product.originalPrice != null ? product.originalPrice.toString() : ''),
       stock: (product.stock != null ? product.stock.toString() : ''), // Changed from stockCount
       category: product.category || '',
-      subcategory: (product as any).subcategory || '',
-      materials: (product as any).materials?.join(', ') || '',
-      dimensions: (product as any).dimensions || '',
-      weight: (product as any).weight || '',
-      colors: (product as any).colors?.join(', ') || '',
-      tags: (product as any).tags?.join(', ') || '',
-      isHandmade: (product as any).isHandmade !== false,
-      shippingTime: (product as any).shippingTime || '',
-      isFeatured: (product as any).isFeatured || false, // Changed from featured
+      subcategory: product.subcategory || '',
+      materials: product.materials?.join(', ') || '',
+      dimensions: product.dimensions || '',
+      weight: product.weight || '',
+      colors: product.colors?.join(', ') || '',
+      tags: product.tags?.join(', ') || '',
+      isHandmade: product.isHandmade !== false,
+      shippingTime: product.shippingTime || '',
+      isFeatured: product.isFeatured || false, // Changed from featured
       artisanId: product.artisan?._id || '',
       images: product.images || [],
-      videos: (product as any).videos || []
-    });
-    console.log('Edit form data set:', {
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      images: product.images
+      videos: product.videos || []
     });
     setIsEditDialogOpen(true);
   };
@@ -989,6 +990,7 @@ export function ProductManagement() {
                   <input
                     type="checkbox"
                     id="edit-handmade"
+                    aria-label="Handmade"
                     checked={editFormData.isHandmade}
                     onChange={(e) => setEditFormData({ ...editFormData, isHandmade: e.target.checked })}
                     className="rounded"
@@ -999,6 +1001,7 @@ export function ProductManagement() {
                   <input
                     type="checkbox"
                     id="edit-featured"
+                    aria-label="Featured Product"
                     checked={editFormData.isFeatured}
                     onChange={(e) => setEditFormData({ ...editFormData, isFeatured: e.target.checked })}
                     className="rounded"
@@ -1014,7 +1017,6 @@ export function ProductManagement() {
               <ImageUpload
                 images={editFormData.images}
                 onImagesChange={(images) => {
-                  console.log('Images changed:', images);
                   setEditFormData({ ...editFormData, images });
                 }}
                 maxImages={5}
@@ -1242,6 +1244,7 @@ export function ProductManagement() {
                   <input
                     type="checkbox"
                     id="create-handmade"
+                    aria-label="Handmade"
                     checked={createFormData.isHandmade}
                     onChange={(e) => setCreateFormData({ ...createFormData, isHandmade: e.target.checked })}
                     className="rounded"
@@ -1252,6 +1255,7 @@ export function ProductManagement() {
                   <input
                     type="checkbox"
                     id="create-featured"
+                    aria-label="Featured Product"
                     checked={createFormData.isFeatured}
                     onChange={(e) => setCreateFormData({ ...createFormData, isFeatured: e.target.checked })}
                     className="rounded"

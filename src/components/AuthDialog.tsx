@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Mail, Lock, UserPlus } from "lucide-react";
+import { User, Mail, Lock, MapPin, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { authSchemas, sanitizeObject, logEvent, ClientRateLimiter } from "@/lib/security";
@@ -16,7 +16,7 @@ interface AuthDialogProps {
 export const AuthDialog = ({ children }: AuthDialogProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, updateUserProfile } = useAuth();
   const limiter = new ClientRateLimiter(5, 60_000);
 
   const [signInData, setSignInData] = useState({
@@ -28,7 +28,12 @@ export const AuthDialog = ({ children }: AuthDialogProps) => {
     name: "",
     email: "",
     password: "",
-    confirmPassword: ""
+    confirmPassword: "",
+    phone: "",
+    street: "",
+    city: "",
+    state: "",
+    zipCode: ""
   });
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -73,9 +78,22 @@ export const AuthDialog = ({ children }: AuthDialogProps) => {
         return;
       }
       await signUp(parsed.data.email, parsed.data.password, parsed.data.name);
+      // Save shipping address collected during sign-up
+      if (signUpData.street || signUpData.phone) {
+        await updateUserProfile({
+          phone: signUpData.phone || undefined,
+          address: signUpData.street ? {
+            street: signUpData.street,
+            city: signUpData.city,
+            state: signUpData.state,
+            zipCode: signUpData.zipCode,
+            country: 'India'
+          } : undefined
+        });
+      }
       toast.success("Account created successfully!");
       setIsOpen(false);
-      setSignUpData({ name: "", email: "", password: "", confirmPassword: "" });
+      setSignUpData({ name: "", email: "", password: "", confirmPassword: "", phone: "", street: "", city: "", state: "", zipCode: "" });
     } catch (error) {
       logEvent({ level: "error", message: "Sign-up failed", context: { error: String(error) } });
       toast.error("Failed to create account. Please try again.");
@@ -207,6 +225,52 @@ export const AuthDialog = ({ children }: AuthDialogProps) => {
                     required
                   />
                 </div>
+              </div>
+
+              {/* Shipping address — collected at registration so checkout is frictionless */}
+              <div className="space-y-3 pt-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5" /> Shipping Address
+                </p>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="signup-phone"
+                    type="tel"
+                    placeholder="Phone number (e.g. 9876543210)"
+                    className="pl-10"
+                    value={signUpData.phone}
+                    onChange={(e) => setSignUpData(prev => ({ ...prev, phone: e.target.value }))}
+                  />
+                </div>
+                <Input
+                  id="signup-street"
+                  placeholder="Street address"
+                  value={signUpData.street}
+                  onChange={(e) => setSignUpData(prev => ({ ...prev, street: e.target.value }))}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    id="signup-city"
+                    placeholder="City"
+                    value={signUpData.city}
+                    onChange={(e) => setSignUpData(prev => ({ ...prev, city: e.target.value }))}
+                  />
+                  <Input
+                    id="signup-state"
+                    placeholder="State"
+                    value={signUpData.state}
+                    onChange={(e) => setSignUpData(prev => ({ ...prev, state: e.target.value }))}
+                  />
+                </div>
+                <Input
+                  id="signup-zip"
+                  placeholder="PIN Code (e.g. 400001)"
+                  value={signUpData.zipCode}
+                  onChange={(e) => setSignUpData(prev => ({ ...prev, zipCode: e.target.value }))}
+                  pattern="[0-9]{6}"
+                />
+                <p className="text-xs text-muted-foreground">Optional — saves you time at checkout. You can add or update this from your profile anytime.</p>
               </div>
 
               <Button type="submit" className="w-full" disabled={isLoading}>

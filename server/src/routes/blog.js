@@ -95,7 +95,7 @@ router.get('/', async (req, res) => {
 			}
 		})
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -113,7 +113,7 @@ router.get('/categories', async (req, res) => {
 		
 		res.json(categoryNames)
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -133,7 +133,7 @@ router.get('/tags', async (req, res) => {
 			count: tag.count
 		})))
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -151,7 +151,7 @@ router.get('/featured', async (req, res) => {
 		
 		res.json(posts)
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -179,7 +179,7 @@ router.get('/:identifier', async (req, res) => {
 		
 		res.json(post)
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -215,7 +215,7 @@ router.get('/:identifier/related', async (req, res) => {
 		
 		res.json(relatedPosts)
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -246,7 +246,7 @@ router.post('/', requireAuth, async (req, res) => {
 		if (error.code === 11000) {
 			return res.status(400).json({ error: 'A post with this title already exists' })
 		}
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -270,7 +270,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 		
 		res.json({ message: 'Blog post updated successfully', post })
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -289,7 +289,7 @@ router.patch('/:id/like', async (req, res) => {
 		
 		res.json({ message: 'Post liked successfully', likes: post.likes })
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 
@@ -308,7 +308,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 		
 		res.json({ message: 'Blog post deleted successfully' })
 	} catch (error) {
-		res.status(500).json({ error: error.message })
+		res.status(500).json({ error: 'Server error' })
 	}
 })
 

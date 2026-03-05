@@ -80,7 +80,7 @@ router.get('/',
 			}
 
 			if (inStock) {
-				filter.stockCount = { $gt: 0 }
+				filter.stock = { $gt: 0 }
 			}
 
 			if (featured !== undefined) {
@@ -121,8 +121,8 @@ router.get('/',
 				dimensions: product.dimensions,
 				weight: product.weight,
 				colors: Array.isArray(product.colors) ? product.colors : [],
-				inStock: product.inStock,
-				stockCount: product.stockCount,
+				inStock: product.inStock ?? ((product.stock ?? product.stockCount ?? 0) > 0),
+				stockCount: product.stock ?? product.stockCount ?? 0,
 				artisan: product.artisanId ? {
 					id: product.artisanId._id.toString(), 
 					name: product.artisanId.name,
@@ -269,8 +269,8 @@ router.get('/:id', optionalAuth, async (req, res) => {
 			dimensions: product.dimensions,
 			weight: product.weight,
 			colors: Array.isArray(product.colors) ? product.colors : [],
-			inStock: product.inStock,
-			stockCount: product.stockCount,
+			inStock: product.inStock ?? ((product.stock ?? product.stockCount ?? 0) > 0),
+			stockCount: product.stock ?? product.stockCount ?? 0,
 			artisan: product.artisanId ? {
 				id: product.artisanId._id.toString(),
 				name: product.artisanId.name,

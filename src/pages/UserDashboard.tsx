@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useAuth } from "@/contexts/AuthContext";
 import { useCart } from "@/contexts/CartContext";
 import { api, getImageUrl } from "@/lib/api";
+import { CancellationFeeDialog } from "@/components/CancellationFeeDialog";
 import { 
   User, 
   Package, 
@@ -23,12 +25,24 @@ import {
   Eye,
   ShoppingBag,
   Calendar,
-  Loader2 
+  Loader2,
+  Ban,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/components/ui/use-toast";
+
+interface WishlistItem {
+  id: string;
+  name: string;
+  image: string;
+  price: number;
+}
 
 interface Order {
   _id: string;
+  orderNumber?: string;
   items: Array<{
     product: {
       _id: string;
@@ -40,19 +54,28 @@ interface Order {
     price: number;
   }>;
   totalAmount: number;
-  status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'placed' | 'confirmed' | 'processing' | 'packed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'returned' | 'refunded' | 'rejected';
   createdAt: string;
   paymentMethod: string;
   paymentStatus: string;
+  rejectionReason?: string;
+  rejectedAt?: string;
+  statusHistory?: Array<{ status: string; timestamp: string; note?: string; }>;
 }
 
 export default function UserDashboard() {
   const { user, updateUser, updateUserProfile, signOut } = useAuth();
   const { cart } = useCart();
   const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/', { replace: true });
+  };
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [wishlist, setWishlist] = useState<any[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -80,6 +103,7 @@ export default function UserDashboard() {
       if (user) loadUserData();
     }, 30000);
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
@@ -128,9 +152,13 @@ export default function UserDashboard() {
       ]);
       
       // Transform API orders to match local Order interface
-      const transformedOrders: Order[] = (ordersData.orders || []).map((order: any) => ({
+      type ApiOrderItem = { productId: string; name: string; image: string; price: number; quantity: number };
+      type ApiOrder = { id: string; orderNumber?: string; items: ApiOrderItem[]; total: number; status: Order['status']; createdAt: string; paymentMethod: string; paymentStatus: string };
+      const rawOrders = (ordersData.orders as unknown as ApiOrder[]) || [];
+      const transformedOrders: Order[] = rawOrders.map((order) => ({
         _id: order.id,
-        items: order.items.map((item: any) => ({
+        orderNumber: order.orderNumber,
+        items: order.items.map((item: ApiOrderItem) => ({
           product: {
             _id: item.productId,
             name: item.name,
@@ -148,7 +176,7 @@ export default function UserDashboard() {
       }));
       
       setOrders(transformedOrders);
-      setWishlist(wishlistData);
+      setWishlist((wishlistData || []) as unknown as WishlistItem[]);
     } catch (error) {
       console.error('Error loading user data:', error);
       toast({
@@ -166,11 +194,12 @@ export default function UserDashboard() {
     try {
       let avatarUrl: string | undefined;
       if (avatarFile) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const uploadResult: any = await api.uploadImage(avatarFile);
         avatarUrl = uploadResult.url || uploadResult.data?.url || uploadResult.imageUrl || uploadResult["url"];
       }
 
-      const payload: any = {
+      const payload: { name: string; phone: string; address: typeof profileData.address; avatar?: string } = {
         name: profileData.name,
         phone: profileData.phone,
         address: profileData.address,
@@ -182,40 +211,67 @@ export default function UserDashboard() {
         await updateUserProfile(payload);
       } else {
         // fallback: update local user
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         updateUser(profileData as any);
       }
 
       setAvatarFile(null);
       setEditingProfile(false);
       toast({ title: 'Profile updated', description: 'Your profile has been successfully updated' });
-    } catch (err: any) {
+    } catch (err) {
       console.error('Profile update failed', err);
-      toast({ title: 'Error updating profile', description: err?.message || 'Failed to update your profile', variant: 'destructive' });
+      const errMsg = err instanceof Error ? err.message : 'Failed to update your profile';
+      toast({ title: 'Error updating profile', description: errMsg, variant: 'destructive' });
     }
   };
 
   // removed dynamic helper; using updateUserProfile from AuthContext instead
 
+  type BadgeConfig = { variant: "secondary" | "default" | "destructive"; text: string };
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, any> = {
+    const variants: Record<string, BadgeConfig> = {
       pending: { variant: "secondary", text: "Pending" },
+      placed: { variant: "secondary", text: "Placed" },
       confirmed: { variant: "default", text: "Confirmed" },
+      processing: { variant: "default", text: "Processing" },
+      packed: { variant: "default", text: "Packed" },
       shipped: { variant: "default", text: "Shipped" },
+      out_for_delivery: { variant: "default", text: "Out for Delivery" },
       delivered: { variant: "default", text: "Delivered" },
-      cancelled: { variant: "destructive", text: "Cancelled" }
+      returned: { variant: "secondary", text: "Returned" },
+      refunded: { variant: "secondary", text: "Refunded" },
+      cancelled: { variant: "destructive", text: "Cancelled" },
+      rejected: { variant: "destructive", text: "Rejected" }
     };
     const config = variants[status] || variants.pending;
     return <Badge variant={config.variant}>{config.text}</Badge>;
   };
 
-  const handleCancelOrder = async (orderId: string) => {
-    try {
-      await api.cancelOrder(orderId);
-      toast({ title: 'Order cancelled', description: 'Your order was cancelled' });
-      await loadUserData();
-    } catch (err: any) {
-      toast({ title: 'Cancel failed', description: err.message || 'Failed to cancel order', variant: 'destructive' });
-    }
+  const [expandedTimelines, setExpandedTimelines] = useState<Set<string>>(new Set());
+
+  const toggleTimeline = (orderId: string) => {
+    setExpandedTimelines(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  // Module 5: open the cancellation-fee dialog instead of cancelling immediately
+  const [cancelDialog, setCancelDialog] = useState<{
+    open: boolean;
+    orderId: string;
+    orderNumber: string;
+  }>({ open: false, orderId: '', orderNumber: '' });
+
+  const handleCancelOrder = (orderId: string) => {
+    const order = orders.find(o => o._id === orderId);
+    setCancelDialog({
+      open: true,
+      orderId,
+      orderNumber: order?.orderNumber || orderId,
+    });
   };
 
   const handlePayNow = async (orderId: string) => {
@@ -226,8 +282,9 @@ export default function UserDashboard() {
       } else {
         toast({ title: 'Payment failed', description: 'Could not create payment order', variant: 'destructive' });
       }
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Failed to initiate payment', variant: 'destructive' });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to initiate payment';
+      toast({ title: 'Error', description: errMsg, variant: 'destructive' });
     }
   };
 
@@ -300,7 +357,14 @@ export default function UserDashboard() {
           {/* Main Content Tabs */}
           <Tabs defaultValue="orders" className="space-y-6">
             <TabsList className="grid w-full lg:w-auto grid-cols-3">
-              <TabsTrigger value="orders">My Orders</TabsTrigger>
+              <TabsTrigger value="orders" className="relative">
+                My Orders
+                {orders.filter(o => o.status === 'rejected').length > 0 && (
+                  <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-xs w-5 h-5">
+                    {orders.filter(o => o.status === 'rejected').length}
+                  </span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="profile">Profile</TabsTrigger>
               <TabsTrigger value="wishlist">Wishlist</TabsTrigger>
             </TabsList>
@@ -331,7 +395,9 @@ export default function UserDashboard() {
                   ) : (
                     <div className="space-y-4">
                       {orders.map((order) => (
-                        <div key={order._id} className="border rounded-lg p-4">
+                        <div key={order._id} className={`border rounded-lg p-4 ${
+                          order.status === 'rejected' ? 'ring-1 ring-red-300 border-red-200 bg-red-50/30' : ''
+                        }`}>
                           <div className="flex items-center justify-between mb-4">
                             <div>
                               <p className="font-medium">Order #{order._id.slice(-8)}</p>
@@ -345,6 +411,32 @@ export default function UserDashboard() {
                               <p className="text-lg font-bold mt-1">₹{order.totalAmount.toLocaleString()}</p>
                             </div>
                           </div>
+
+                          {/* Rejection Alert Banner */}
+                          {order.status === 'rejected' && (
+                            <Alert variant="destructive" className="mb-4 bg-red-50 border-red-200">
+                              <Ban className="h-4 w-4" />
+                              <AlertTitle className="text-red-800 font-semibold">Order Rejected by Seller</AlertTitle>
+                              <AlertDescription className="text-red-700">
+                                {order.rejectionReason ? (
+                                  <p className="mt-1">
+                                    <span className="font-medium">Reason: </span>
+                                    <em>"{order.rejectionReason}"</em>
+                                  </p>
+                                ) : (
+                                  <p className="mt-1 text-sm">The seller has rejected this order.</p>
+                                )}
+                                {order.rejectedAt && (
+                                  <p className="text-xs mt-1 text-red-500">
+                                    Rejected on {new Date(order.rejectedAt).toLocaleString()}
+                                  </p>
+                                )}
+                                <p className="text-xs mt-2 text-red-600">
+                                  If a payment was made, a refund will be processed within 5–7 business days.
+                                </p>
+                              </AlertDescription>
+                            </Alert>
+                          )}
                           
                           <div className="space-y-2">
                             {order.items.map((item) => (
@@ -364,26 +456,77 @@ export default function UserDashboard() {
                             ))}
                           </div>
 
+                          {/* Collapsible Status Timeline */}
+                          {order.statusHistory && order.statusHistory.length > 0 && (
+                            <div className="mb-4">
+                              <button
+                                className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground transition-colors"
+                                onClick={() => toggleTimeline(order._id)}
+                              >
+                                {expandedTimelines.has(order._id)
+                                  ? <><ChevronUp className="w-3 h-3" /> Hide timeline</>
+                                  : <><ChevronDown className="w-3 h-3" /> Show timeline ({order.statusHistory.length} events)</>}
+                              </button>
+                              {expandedTimelines.has(order._id) && (
+                                <div className="mt-2 space-y-1 pl-2 border-l-2 border-muted">
+                                  {[...order.statusHistory].reverse().map((event, i) => (
+                                    <div key={i} className="flex items-start gap-2 text-xs">
+                                      <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                                        event.status === 'rejected' ? 'bg-red-500' :
+                                        event.status === 'delivered' ? 'bg-green-500' :
+                                        i === 0 ? 'bg-primary' : 'bg-muted-foreground'
+                                      }`} />
+                                      <div>
+                                        <span className="font-medium capitalize">{event.status.replace(/_/g, ' ')}</span>
+                                        <span className="text-muted-foreground ml-2">{new Date(event.timestamp).toLocaleString()}</span>
+                                        {event.status === 'rejected' && event.note && (
+                                          <p className="text-red-600 mt-0.5">Reason: {event.note}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           <div className="flex justify-between items-center mt-4 pt-4 border-t">
                             <p className="text-sm text-muted-foreground">
                               Payment: {order.paymentMethod.toUpperCase()}
                             </p>
                             <div className="flex items-center gap-2">
+                              {order.status === 'rejected' && (
+                                <Button size="sm" variant="outline" asChild>
+                                  <a href="/products">Browse Similar</a>
+                                </Button>
+                              )}
                               <DialogTrigger asChild>
                                 <Button variant="outline" size="sm" onClick={() => setSelectedOrder(order)}>
                                   <Eye className="w-4 h-4 mr-2" />
                                   View Details
                                 </Button>
                               </DialogTrigger>
-                              {order.paymentStatus === 'pending' && (
+                              {order.paymentStatus === 'pending' && order.status !== 'rejected' && (
                                 <Button size="sm" onClick={() => handlePayNow(order._id)}>
                                   Pay Now
                                 </Button>
                               )}
-                              {order.status !== 'cancelled' && (
-                                <Button size="sm" variant="destructive" onClick={() => handleCancelOrder(order._id)}>
-                                  Cancel
-                                </Button>
+                              {['placed', 'confirmed', 'processing'].includes(order.status) && (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  {/* Module 10: Inline fee transparency hint */}
+                                  {order.status === 'placed' && (
+                                    <span className="text-[10px] font-medium text-green-600">Free cancel</span>
+                                  )}
+                                  {order.status === 'confirmed' && (
+                                    <span className="text-[10px] font-medium text-orange-600">~2% fee</span>
+                                  )}
+                                  {order.status === 'processing' && (
+                                    <span className="text-[10px] font-medium text-red-600">~5% fee</span>
+                                  )}
+                                  <Button size="sm" variant="destructive" onClick={() => handleCancelOrder(order._id)}>
+                                    Cancel
+                                  </Button>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -422,6 +565,8 @@ export default function UserDashboard() {
                           <Label htmlFor="name">Full Name</Label>
                           <Input
                             id="name"
+                            name="name"
+                            autoComplete="name"
                             value={profileData.name}
                             onChange={(e) => setProfileData({...profileData, name: e.target.value})}
                           />
@@ -430,8 +575,10 @@ export default function UserDashboard() {
                             <Label htmlFor="avatar">Profile Picture</Label>
                             <input
                               id="avatar"
+                              name="avatar"
                               type="file"
                               accept="image/*"
+                              autoComplete="off"
                               onChange={(e) => setAvatarFile(e.target.files ? e.target.files[0] : null)}
                               className="block"
                               aria-label="Upload profile picture"
@@ -444,7 +591,9 @@ export default function UserDashboard() {
                           <Label htmlFor="email">Email</Label>
                           <Input
                             id="email"
+                            name="email"
                             type="email"
+                            autoComplete="email"
                             value={profileData.email}
                             onChange={(e) => setProfileData({...profileData, email: e.target.value})}
                           />
@@ -453,6 +602,8 @@ export default function UserDashboard() {
                           <Label htmlFor="phone">Phone</Label>
                           <Input
                             id="phone"
+                            name="phone"
+                            autoComplete="tel"
                             value={profileData.phone}
                             onChange={(e) => setProfileData({...profileData, phone: e.target.value})}
                           />
@@ -468,6 +619,8 @@ export default function UserDashboard() {
                             <Label htmlFor="street">Street Address</Label>
                             <Input
                               id="street"
+                              name="street"
+                              autoComplete="address-line1"
                               value={profileData.address.street}
                               onChange={(e) => setProfileData({
                                 ...profileData, 
@@ -479,6 +632,8 @@ export default function UserDashboard() {
                             <Label htmlFor="city">City</Label>
                             <Input
                               id="city"
+                              name="city"
+                              autoComplete="address-level2"
                               value={profileData.address.city}
                               onChange={(e) => setProfileData({
                                 ...profileData, 
@@ -490,6 +645,8 @@ export default function UserDashboard() {
                             <Label htmlFor="state">State</Label>
                             <Input
                               id="state"
+                              name="state"
+                              autoComplete="address-level1"
                               value={profileData.address.state}
                               onChange={(e) => setProfileData({
                                 ...profileData, 
@@ -552,7 +709,7 @@ export default function UserDashboard() {
                       <Separator />
 
                       <div className="flex justify-end">
-                        <Button variant="destructive" onClick={signOut}>
+                        <Button variant="destructive" onClick={handleSignOut}>
                           Sign Out
                         </Button>
                       </div>
@@ -653,6 +810,18 @@ export default function UserDashboard() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Module 5: Cancellation Fee Dialog */}
+      <CancellationFeeDialog
+        orderId={cancelDialog.orderId}
+        orderNumber={cancelDialog.orderNumber}
+        open={cancelDialog.open}
+        onOpenChange={(open) => setCancelDialog(prev => ({ ...prev, open }))}
+        onConfirmed={() => {
+          toast({ title: 'Order cancelled', description: 'Your order has been cancelled.' });
+          loadUserData();
+        }}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import Artisan from '../models/Artisan.js';
 import User from '../models/User.js';
+import { documentVerificationService as dv } from '../services/documentVerificationService.js';
 
 const router = express.Router();
 
@@ -254,8 +255,8 @@ router.post('/', upload.fields([
       experience: parseInt(data.yearsOfExperience),
       socials: {},
       verification: {
-        isVerified: true, // Mark as verified since all validations passed
-        documentType: 'aadhar', // Default to aadhaar
+        isVerified: false, // Set to true only after admin approves all required documents
+        documentType: 'aadhar',
         documentNumber: data.aadhaarNumber,
         bankDetails: {
           accountNumber: data.accountNumber,
@@ -312,9 +313,27 @@ router.post('/', upload.fields([
 
     await artisan.save();
 
+    // Trigger document verification workflow for every uploaded file (non-blocking)
+    setImmediate(async () => {
+      const fileTypeMap = [
+        { multerField: 'profilePhoto',   docType: 'profile_photo',   file: uploadedFiles.profilePhoto?.[0] },
+        { multerField: 'aadhaarProof',   docType: 'aadhaar_proof',   file: uploadedFiles.aadhaarProof?.[0] },
+        { multerField: 'gstCertificate', docType: 'gst_certificate', file: uploadedFiles.gstCertificate?.[0] },
+        { multerField: 'craftVideo',     docType: 'craft_video',     file: uploadedFiles.craftVideo?.[0] },
+      ];
+      for (const { docType, file } of fileTypeMap) {
+        if (!file) continue;
+        try {
+          await dv.processUpload(artisan._id, docType, file);
+        } catch (e) {
+          console.error(`[seller-onboarding] docVerify error for ${docType}:`, e.message);
+        }
+      }
+    });
+
     res.json({
       success: true,
-      message: 'Seller onboarding completed successfully',
+      message: 'Seller onboarding completed successfully. Documents have been queued for verification.',
       artisan: {
         id: artisan._id,
         name: artisan.name,
