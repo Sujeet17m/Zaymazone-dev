@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,11 +29,7 @@ export const AuditLogManagement = () => {
   const [filterResource, setFilterResource] = useState("all");
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadAuditLogs();
-  }, []);
-
-  const loadAuditLogs = async () => {
+  const loadAuditLogs = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE}/api/admin/audit-logs`, {
@@ -94,7 +90,11 @@ export const AuditLogManagement = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadAuditLogs();
+  }, [loadAuditLogs]);
 
   const filteredLogs = logs.filter(log => {
     const matchesSearch = log.details.toLowerCase().includes(searchTerm.toLowerCase()) ||

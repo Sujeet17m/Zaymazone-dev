@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,19 +73,7 @@ export const CategoriesManagement = () => {
     return matchesSearch && matchesFeatured;
   });
 
-  useEffect(() => {
-    loadCategories();
-  }, []);
-
-  // Reload when search or filter changes
-  useEffect(() => {
-    const debounceTimer = setTimeout(() => {
-      loadCategories();
-    }, 500);
-    return () => clearTimeout(debounceTimer);
-  }, [searchTerm, filterFeatured]);
-
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
       setLoading(true);
       const data = await adminService.getCategories({ 
@@ -110,7 +98,20 @@ export const CategoriesManagement = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchTerm, filterFeatured, toast]);
+
+  // Initial load on mount only
+  useEffect(() => {
+    loadCategories();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reload when search or filter changes
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      loadCategories();
+    }, 500);
+    return () => clearTimeout(debounceTimer);
+  }, [loadCategories]);
 
   const handleAdd = () => {
     const newCategory: Category = {
